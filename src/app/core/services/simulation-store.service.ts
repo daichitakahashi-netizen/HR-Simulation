@@ -218,6 +218,18 @@ export class SimulationStoreService {
     this.triggerRecalculation();
   }
 
+  getState() {
+    return {
+      employees: this.employees(),
+      allocation: this.allocation(),
+      simulationResult: this.simulationResult(),
+      isLoading: this.isLoading(),
+      reasonText: this.reasonText(),
+      lockedEmployees: this.lockedEmployees(),
+      allocatedEmployeeIds: this.allocatedEmployeeIds(),
+    };
+  }
+
   private generateReasoningText(
     result: AllocationResult,
     objective: DepartmentObjective,
