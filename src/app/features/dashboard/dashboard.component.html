@@ -1,0 +1,160 @@
+<!-- Loading Spinner -->
+@if (isLoading()) {
+  <div class="loading-overlay">
+    <mat-spinner></mat-spinner>
+  </div>
+}
+
+<!-- Main Dashboard Container -->
+<div class="dashboard-container">
+  <!-- Left Column: Control & Policy Panel -->
+  <div class="left-panel">
+    <!-- Purpose Selection -->
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>目的選択</mat-label>
+      <mat-select [value]="selectedObjective()" (selectionChange)="onObjectiveChange($event.value)">
+        @for (obj of objectives; track obj.value) {
+          <mat-option [value]="obj.value">{{ obj.label }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+
+    <!-- 110 Name Toggle -->
+    <mat-slide-toggle
+      class="toggle-item"
+      [checked]="employeeCount() === 110"
+      (change)="onEmployeeCountToggle($event.checked)">
+      110名配置へ切り替え
+    </mat-slide-toggle>
+
+    <!-- Allocation Reason -->
+    <mat-expansion-panel class="reason-panel">
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          配置理由
+        </mat-panel-title>
+      </mat-expansion-panel-header>
+      <p class="reason-content">
+        {{ reasonText() }}
+      </p>
+    </mat-expansion-panel>
+  </div>
+
+  <!-- Right Column: Result & Summary Panel -->
+  <div class="right-panel">
+    <!-- Company KPI Summary -->
+    <div class="kpi-summary">
+      <h2>全社KPIサマリー</h2>
+      <div class="kpi-cards">
+        <mat-card class="kpi-card">
+          <mat-card-content>
+            <div class="kpi-label">全社売上</div>
+            <div class="kpi-value">
+              @if (simulationResult()) {
+                {{ simulationResult()!.summary.totalRevenue | number: '1.0-0' }}
+              } @else {
+                —
+              }
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <mat-card class="kpi-card">
+          <mat-card-content>
+            <div class="kpi-label">全社コスト</div>
+            <div class="kpi-value">
+              @if (simulationResult()) {
+                {{ simulationResult()!.summary.totalCost | number: '1.0-0' }}
+              } @else {
+                —
+              }
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <mat-card class="kpi-card">
+          <mat-card-content>
+            <div class="kpi-label">全社利益</div>
+            <div class="kpi-value">
+              @if (simulationResult()) {
+                {{ simulationResult()!.summary.totalProfit | number: '1.0-0' }}
+              } @else {
+                —
+              }
+            </div>
+          </mat-card-content>
+        </mat-card>
+      </div>
+    </div>
+
+    <!-- Department Status -->
+    <div class="department-status">
+      <h2>事業部ステータス</h2>
+      <div class="department-cards">
+        @for (dept of departments; track dept.id) {
+          @let deptResult = getDepartmentResult(simulationResult(), dept.id);
+          <mat-card class="department-card">
+            <mat-card-header>
+              <mat-card-title>{{ dept.label }}</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              @if (deptResult) {
+                <div class="dept-info">
+                  <div class="info-row">
+                    <span>配置人数:</span>
+                    <strong>{{ deptResult.allocatedEmployees }}</strong>
+                  </div>
+                  <div class="info-row">
+                    <span>能力値:</span>
+                    <strong>{{ deptResult.departmentCapability | number: '1.0-0' }}</strong>
+                  </div>
+                  <div class="info-row">
+                    <span>基本売上:</span>
+                    <strong>{{ deptResult.baseRevenue | number: '1.0-0' }}</strong>
+                  </div>
+                  <div class="info-row">
+                    <span>充足率:</span>
+                    <strong>{{ deptResult.fulfillmentRate | number: '0.0-2' }}</strong>
+                  </div>
+                  <div class="info-row">
+                    <span>最終売上:</span>
+                    <strong>{{ deptResult.finalRevenue | number: '1.0-0' }}</strong>
+                  </div>
+                  <div class="info-row">
+                    <span>コスト:</span>
+                    <strong>{{ deptResult.cost | number: '1.0-0' }}</strong>
+                  </div>
+                  <div class="info-row">
+                    <span>利益:</span>
+                    <strong>{{ deptResult.profit | number: '1.0-0' }}</strong>
+                  </div>
+                </div>
+
+                <!-- Penalty Details Accordion -->
+                <mat-accordion class="penalty-accordion">
+                  <mat-expansion-panel>
+                    <mat-expansion-panel-header>
+                      <mat-panel-title>ペナルティ内訳</mat-panel-title>
+                    </mat-expansion-panel-header>
+                    <div class="penalty-details">
+                      <div class="penalty-row">
+                        <span>不足補正係数:</span>
+                        <strong>{{ deptResult.shortageCoefficient | number: '1.0-4' }}</strong>
+                      </div>
+                      <div class="penalty-row">
+                        <span>過剰補正係数:</span>
+                        <strong>{{ deptResult.surplusCoefficient | number: '1.0-4' }}</strong>
+                      </div>
+                    </div>
+                  </mat-expansion-panel>
+                </mat-accordion>
+              } @else {
+                <p>データ読み込み中...</p>
+              }
+            </mat-card-content>
+          </mat-card>
+        }
+      </div>
+    </div>
+  </div>
+</div>
