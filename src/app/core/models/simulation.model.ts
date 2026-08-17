@@ -92,3 +92,6 @@ export interface SimulationParams {
   allocation: Record<string, number>; // department -> allocated employees
   totalEmployees: number; // 全社員数 (for dynamic scaling)
 }
+
+// Department objective
+export type DepartmentObjective = 'totalRevenue' | 'departmentAProfitMaximize' | 'departmentBRevenueMaximize' | 'departmentCRevenueMaximize';

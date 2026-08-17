@@ -1,0 +1,107 @@
+<div class="report-container no-print">
+  <mat-toolbar color="accent" class="report-actions">
+    <button mat-raised-button color="primary" (click)="print()">
+      <mat-icon>print</mat-icon>
+      レポート印刷
+    </button>
+    <button mat-raised-button color="accent" (click)="downloadCsv()">
+      <mat-icon>download</mat-icon>
+      配置リストダウンロード
+    </button>
+  </mat-toolbar>
+</div>
+
+<div class="report-content">
+  <!-- Warnings Section -->
+  <div *ngIf="(warnings() || []).length > 0" class="warnings-section">
+    <mat-card class="warning-card">
+      <mat-card-header>
+        <mat-icon class="warning-icon">warning</mat-icon>
+        <mat-card-title>配置制約チェック</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <div *ngFor="let warning of warnings()" class="warning-item">
+          {{ warning }}
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
+  <!-- Executive Summary Section (A4 optimized) -->
+  <mat-card class="summary-card">
+    <mat-card-header>
+      <mat-card-title>配置方針・エグゼクティブサマリー</mat-card-title>
+      <mat-card-subtitle>{{ now | date: 'yyyy年MM月dd日' }}</mat-card-subtitle>
+    </mat-card-header>
+
+    <mat-card-content>
+      <div *ngIf="simulationResult() as result" class="summary-content">
+        <!-- Department Allocation Overview -->
+        <div class="section allocation-overview">
+          <h3>配置人員概要</h3>
+          <div class="allocation-grid">
+            <div *ngFor="let entry of allocation() | keyvalue" class="allocation-item">
+              <div class="dept-name">{{ entry.key }}事業部</div>
+              <div class="dept-count">{{ entry.value }}名</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI Summary -->
+        <div class="section kpi-summary">
+          <h3>全社KPI</h3>
+          <div class="kpi-grid">
+            <div class="kpi-item">
+              <div class="kpi-label">全社売上</div>
+              <div class="kpi-value">{{ result.summary.totalRevenue.toFixed(1) }}</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-label">全社コスト</div>
+              <div class="kpi-value">{{ result.summary.totalCost.toFixed(1) }}</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-label">全社利益</div>
+              <div class="kpi-value profit">{{ result.summary.totalProfit.toFixed(1) }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Department Details -->
+        <div class="section dept-details">
+          <h3>事業部別詳細</h3>
+          <div class="dept-cards">
+            <div *ngFor="let entry of result.department | keyvalue" class="dept-card">
+              <div class="dept-header">{{ entry.key }}事業部</div>
+              <div class="dept-metrics">
+                <div class="metric-row">
+                  <span class="metric-label">配置人数:</span>
+                  <span class="metric-value">{{ entry.value.allocatedEmployees }}名</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">能力値:</span>
+                  <span class="metric-value">{{ entry.value.departmentCapability.toFixed(1) }}</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">充足率:</span>
+                  <span class="metric-value">{{ (entry.value.fulfillmentRate * 100).toFixed(1) }}%</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">売上:</span>
+                  <span class="metric-value">{{ entry.value.finalRevenue.toFixed(1) }}</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">利益:</span>
+                  <span class="metric-value">{{ entry.value.profit.toFixed(1) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="!simulationResult()" class="no-data">
+        シミュレーション結果がありません
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>

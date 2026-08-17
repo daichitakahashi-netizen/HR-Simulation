@@ -1,59 +1,107 @@
-import { Injectable, signal, effect } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { BehaviorSubject, combineLatest, distinctUntilChanged, of } from 'rxjs';
+import { tap, switchMap } from 'rxjs/operators';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
 import {
   Employee,
-  AllocationMap,
   AllocationResult,
+  DepartmentObjective,
+  AllocationMap,
 } from '../models/simulation.model';
 
 @Injectable({
   providedIn: 'root',
 })
 export class SimulationStoreService {
-  // State signals
+  // State observables using BehaviorSubject
+  readonly employees$ = new BehaviorSubject<Employee[]>([]);
+  readonly currentObjective$ = new BehaviorSubject<DepartmentObjective>('totalRevenue');
+  readonly is110Mode$ = new BehaviorSubject<boolean>(false);
+  readonly simulationResult$ = new BehaviorSubject<AllocationResult | null>(null);
+  readonly reasoningText$ = new BehaviorSubject<string>('');
+
+  // Compatibility layer for signal-based components
+  readonly simulationResult = signal<AllocationResult | null>(null);
   readonly employees = signal<Employee[]>([]);
   readonly allocation = signal<AllocationMap>({});
-  readonly simulationResult = signal<AllocationResult | null>(null);
-  readonly isLoading = signal(false);
-  readonly selectedObjective = signal<string>('total_revenue');
-  readonly employeeCount = signal<number>(100);
+  readonly selectedObjective = signal<string>('totalRevenue');
   readonly reasonText = signal<string>('');
-  readonly lockedEmployees = signal<Record<string, string>>({}); // employeeId -> department
+  readonly lockedEmployees = signal<Record<string, string>>({});
+  readonly isLoading = signal<boolean>(false);
+  readonly employeeCount = signal<number>(100);
+  readonly allocatedEmployeeIds = signal<Record<string, string[]>>({ A: [], B: [], C: [] });
 
   constructor(
     private httpClient: HttpClient,
     private simulationEngineService: SimulationEngineService,
     private csvParserService: CsvParserService
   ) {
-    // Effect to recalculate simulation when allocation or employees change
-    effect(() => {
-      const employees = this.employees();
-      const allocation = this.allocation();
-
-      // Only run simulation if we have employees and allocation
-      if (employees.length > 0 && Object.keys(allocation).length > 0) {
-        this.runSimulation(employees, allocation);
-      }
-    });
-
-    // Effect to generate reason text after simulation result changes
-    effect(() => {
-      const result = this.simulationResult();
-      const objective = this.selectedObjective();
-      if (result) {
-        const reason = this.generateReasonText(result, objective);
-        this.reasonText.set(reason);
-      }
-    });
+    this.setupReactiveDataFlow();
   }
 
-  // Load initial data from CSV
-  loadInitialData(): void {
+  private setupReactiveDataFlow(): void {
+    combineLatest([
+      this.employees$,
+      this.currentObjective$,
+      this.is110Mode$,
+    ])
+      .pipe(
+        distinctUntilChanged((prev, curr) => {
+          return JSON.stringify(prev) === JSON.stringify(curr);
+        }),
+        tap(() => this.isLoading.set(true)),
+        switchMap(([employees, objective, is110Mode]) => {
+          this.employees.set(employees);
+          this.selectedObjective.set(objective);
+
+          if (employees.length === 0) {
+            return of(null);
+          }
+
+          const totalEmployees = is110Mode ? 110 : employees.length;
+          const lockedEmployees = this.lockedEmployees();
+          const allocation = this.simulationEngineService.calculateOptimalAllocation(
+            employees,
+            objective,
+            lockedEmployees
+          );
+          const allocatedIds = this.simulationEngineService.getAllocatedEmployeeMapping(
+            employees,
+            objective,
+            lockedEmployees
+          );
+          const result = this.simulationEngineService.simulate(
+            employees,
+            allocation,
+            totalEmployees
+          );
+
+          this.simulationResult$.next(result);
+          this.simulationResult.set(result);
+          this.allocation.set(allocation);
+          this.allocatedEmployeeIds.set(allocatedIds);
+
+          const reasoningText = this.generateReasoningText(result, objective);
+          this.reasoningText$.next(reasoningText);
+          this.reasonText.set(reasoningText);
+
+          return of(result);
+        }),
+        tap(() => this.isLoading.set(false))
+      )
+      .subscribe();
+  }
+
+  private triggerRecalculation(): void {
+    const employees = this.employees$.value;
+    this.employees$.next([...employees]);
+  }
+
+  loadInitialData(count: number = 100): void {
     this.isLoading.set(true);
-    const count = this.employeeCount();
-    const csvFile = count === 110 ? 'assets/human_resources_110.csv' : 'assets/human_resources_100.csv';
+    const csvFile = count === 110 ? '/assets/human_resources_110.csv' : '/assets/human_resources_100.csv';
 
     this.httpClient.get(csvFile, {
       responseType: 'text',
@@ -61,26 +109,26 @@ export class SimulationStoreService {
       next: (csvText) => {
         let parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
 
-        // If requesting 110 employees but file has fewer, add mock data
         if (count === 110 && parsedEmployees.length < 110) {
           parsedEmployees = this.addMockEmployees(parsedEmployees, 110 - parsedEmployees.length);
         }
 
-        this.employees.set(parsedEmployees);
+        this.employees$.next(parsedEmployees);
+        this.is110Mode$.next(count === 110);
         this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Failed to load CSV:', error);
-        // Fallback: try 100 employee file or use mock data
-        this.httpClient.get('assets/human_resources_100.csv', {
+        this.httpClient.get('/assets/human_resources_100.csv', {
           responseType: 'text',
         }).subscribe({
           next: (csvText) => {
             let parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
-            if (this.employeeCount() === 110) {
+            if (count === 110) {
               parsedEmployees = this.addMockEmployees(parsedEmployees, 110 - parsedEmployees.length);
             }
-            this.employees.set(parsedEmployees);
+            this.employees$.next(parsedEmployees);
+            this.is110Mode$.next(count === 110);
             this.isLoading.set(false);
           },
           error: () => {
@@ -92,7 +140,6 @@ export class SimulationStoreService {
     });
   }
 
-  // Add mock employees to reach desired count
   private addMockEmployees(employees: Employee[], count: number): Employee[] {
     const mockEmployees: Employee[] = [...employees];
     for (let i = 0; i < count; i++) {
@@ -108,149 +155,25 @@ export class SimulationStoreService {
     return mockEmployees;
   }
 
-  // Update allocation
+  setEmployees(employees: Employee[]): void {
+    this.employees$.next(employees);
+  }
+
+  updateObjective(objective: DepartmentObjective | string): void {
+    const obj = objective as DepartmentObjective;
+    this.currentObjective$.next(obj);
+  }
+
   updateAllocation(allocation: AllocationMap): void {
     this.allocation.set(allocation);
   }
 
-  // Update objective and recalculate allocation
-  updateObjective(objective: string): void {
-    this.selectedObjective.set(objective);
-    const newAllocation = this.calculateAllocationForObjective(objective, this.employeeCount());
-    this.updateAllocation(newAllocation);
-  }
-
-  // Calculate allocation based on objective using heuristic rules, respecting locked employees
-  private calculateAllocationForObjective(objective: string, totalEmployees: number): AllocationMap {
-    const locked = this.lockedEmployees();
-    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
-
-    // Count locked employees per department
-    Object.entries(locked).forEach(([, dept]) => {
-      if (lockedCounts[dept] !== undefined) {
-        lockedCounts[dept]++;
-      }
-    });
-
-    const baseAllocation = totalEmployees === 100
-      ? { A: 40, B: 35, C: 25 }
-      : { A: 44, B: 39, C: 27 };
-
-    let targetAllocation: AllocationMap;
-    switch (objective) {
-      case 'total_revenue':
-        targetAllocation = baseAllocation;
-        break;
-      case 'a_profit':
-        targetAllocation = totalEmployees === 100
-          ? { A: 50, B: 30, C: 20 }
-          : { A: 55, B: 33, C: 22 };
-        break;
-      case 'b_revenue':
-        targetAllocation = totalEmployees === 100
-          ? { A: 35, B: 45, C: 20 }
-          : { A: 38, B: 50, C: 22 };
-        break;
-      case 'c_revenue':
-        targetAllocation = totalEmployees === 100
-          ? { A: 30, B: 30, C: 40 }
-          : { A: 33, B: 33, C: 44 };
-        break;
-      default:
-        targetAllocation = baseAllocation;
-    }
-
-    // Adjust allocation to respect locked employees
-    const lockedTotal = Object.values(lockedCounts).reduce((a, b) => a + b, 0);
-    const remainingEmployees = totalEmployees - lockedTotal;
-    const baseTotal = Object.values(baseAllocation).reduce((a, b) => a + b, 0);
-
-    // Scale target allocation proportionally for remaining employees
-    const scaledAllocation: AllocationMap = {};
-    let totalScaled = 0;
-
-    Object.entries(targetAllocation).forEach(([dept, count]) => {
-      const proportion = count / baseTotal;
-      const scaledCount = Math.round(proportion * remainingEmployees);
-      scaledAllocation[dept] = lockedCounts[dept] + scaledCount;
-      totalScaled += scaledCount;
-    });
-
-    // Adjust for rounding errors
-    const diff = totalEmployees - Object.values(scaledAllocation).reduce((a, b) => a + b, 0);
-    if (diff !== 0) {
-      // Add/subtract from the largest department
-      const largestDept = Object.entries(scaledAllocation).sort(([, a], [, b]) => b - a)[0][0];
-      scaledAllocation[largestDept] += diff;
-    }
-
-    return scaledAllocation;
-  }
-
-  // Set employee count and reload data
   setEmployeeCount(count: number): void {
     this.employeeCount.set(count);
-    this.loadInitialData();
+    this.is110Mode$.next(count === 110);
+    this.loadInitialData(count);
   }
 
-  // Generate reason text based on simulation result and objective
-  private generateReasonText(result: AllocationResult, objective: string): string {
-    const deptA = result.department['A'];
-    const deptB = result.department['B'];
-    const deptC = result.department['C'];
-
-    switch (objective) {
-      case 'total_revenue':
-        return `全社売上を最大化するため、各事業部に均衡した人数配置を実施しました。A事業部${deptA.allocatedEmployees}名、B事業部${deptB.allocatedEmployees}名、C事業部${deptC.allocatedEmployees}名の配置により、全社売上${result.summary.totalRevenue.toFixed(1)}を達成しました。`;
-
-      case 'a_profit':
-        return `A事業部の利益最大化を優先し、営業力および管理力の高い人材をA事業部に集中配置しました。A事業部${deptA.allocatedEmployees}名配置により、当部門の利益${deptA.profit.toFixed(1)}を達成。他事業部は最低限の配置としています。`;
-
-      case 'b_revenue':
-        return `B事業部の売上最大化を目指し、営業力が高い人材をB事業部に優先配置しました。B事業部${deptB.allocatedEmployees}名の集中投下により、当部門の売上${deptB.finalRevenue.toFixed(1)}を目指しています。`;
-
-      case 'c_revenue':
-        return `新規事業であるC事業部の売上最大化のため、開拓力の高い人材をC事業部に集中させ、他事業部は最低配置人数としました。C事業部${deptC.allocatedEmployees}名配置により、当部門の成長率を最大化します。`;
-
-      default:
-        return '配置理由の詳細はここに表示されます';
-    }
-  }
-
-  // Set employees directly (useful for testing)
-  setEmployees(employees: Employee[]): void {
-    this.employees.set(employees);
-  }
-
-  // Run simulation
-  private runSimulation(
-    employees: Employee[],
-    allocation: AllocationMap
-  ): void {
-    const totalEmployees = Object.values(allocation).reduce(
-      (sum, count) => sum + count,
-      0
-    );
-    const result = this.simulationEngineService.simulate(
-      employees,
-      allocation,
-      Math.max(totalEmployees, 100) // Use at least 100 as base
-    );
-    this.simulationResult.set(result);
-  }
-
-  // Toggle lock state for an employee
-  toggleLock(employeeId: string, department: string): void {
-    const locked = { ...this.lockedEmployees() };
-    if (locked[employeeId] === department) {
-      delete locked[employeeId];
-    } else {
-      locked[employeeId] = department;
-    }
-    this.lockedEmployees.set(locked);
-  }
-
-  // Get average abilities across all employees and determine strengths/weaknesses
   getAverageAbilities() {
     const emps = this.employees();
     if (emps.length === 0) {
@@ -270,7 +193,6 @@ export class SimulationStoreService {
     return { avgSales, avgManagement, avgDevelopment, avgNurture, overallAvg };
   }
 
-  // Get strengths and weaknesses
   getStrengthsWeaknesses() {
     const avg = this.getAverageAbilities();
     const overallAvg = avg.overallAvg;
@@ -290,17 +212,47 @@ export class SimulationStoreService {
     };
   }
 
-  // Get current state as object (for debugging/testing)
-  getState() {
-    return {
-      employees: this.employees(),
-      allocation: this.allocation(),
-      simulationResult: this.simulationResult(),
-      isLoading: this.isLoading(),
-      selectedObjective: this.selectedObjective(),
-      employeeCount: this.employeeCount(),
-      reasonText: this.reasonText(),
-      lockedEmployees: this.lockedEmployees(),
-    };
+  toggleLock(employeeId: string, department: string): void {
+    const locked = { ...this.lockedEmployees() };
+    if (locked[employeeId] === department) {
+      delete locked[employeeId];
+    } else {
+      locked[employeeId] = department;
+    }
+    this.lockedEmployees.set(locked);
+    this.triggerRecalculation();
+  }
+
+  private generateReasoningText(result: AllocationResult, objective: DepartmentObjective): string {
+    const deptA = result.department['A'];
+    const deptB = result.department['B'];
+    const deptC = result.department['C'];
+
+    const departments = [
+      { name: 'A事業部', profit: deptA.profit, revenue: deptA.finalRevenue },
+      { name: 'B事業部', profit: deptB.profit, revenue: deptB.finalRevenue },
+      { name: 'C事業部', profit: deptC.profit, revenue: deptC.finalRevenue },
+    ];
+
+    let objectiveText = '';
+    let maxDeptName = 'A事業部';
+
+    if (objective === 'totalRevenue') {
+      objectiveText = '全社売上最大化';
+    } else if (objective === 'departmentAProfitMaximize') {
+      objectiveText = 'A事業部の利益最大化';
+      maxDeptName = 'A事業部';
+    } else if (objective === 'departmentBRevenueMaximize') {
+      objectiveText = 'B事業部の売上最大化';
+      maxDeptName = 'B事業部';
+    } else if (objective === 'departmentCRevenueMaximize') {
+      objectiveText = 'C事業部の売上最大化';
+      maxDeptName = 'C事業部';
+    }
+
+    const totalCost = result.summary.totalCost.toFixed(1);
+    const totalRevenue = result.summary.totalRevenue.toFixed(1);
+
+    return `【${objectiveText}】を達成するため、成長率と能力値のバランスから【${maxDeptName}】へ優先的に人材を配置しました。また、各事業部の最低要員を確保しつつ、各部門の充足率を最適化することで、全社コストを【${totalCost}億円】に抑え、最終的に【${totalRevenue}億円】を実現しました。`;
   }
 }

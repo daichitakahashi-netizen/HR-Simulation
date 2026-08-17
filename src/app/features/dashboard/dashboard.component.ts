@@ -39,10 +39,10 @@ export class DashboardComponent implements OnInit {
   ];
 
   objectives = [
-    { value: 'total_revenue', label: '全社売上最大化' },
-    { value: 'a_profit', label: 'A事業部利益最大化' },
-    { value: 'b_revenue', label: 'B事業部売上最大化' },
-    { value: 'c_revenue', label: 'C事業部売上最大化' },
+    { value: 'totalRevenue', label: '全社売上最大化' },
+    { value: 'departmentAProfitMaximize', label: 'A事業部利益最大化' },
+    { value: 'departmentBRevenueMaximize', label: 'B事業部売上最大化' },
+    { value: 'departmentCRevenueMaximize', label: 'C事業部売上最大化' },
   ];
 
   ngOnInit(): void {

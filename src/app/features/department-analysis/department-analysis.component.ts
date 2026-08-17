@@ -48,32 +48,16 @@ export class DepartmentAnalysisComponent implements OnInit {
   getEmployeesForDept(): Employee[] {
     const dept = this.selectedDept();
     const employees = this.store.employees();
-    const result = this.store.simulationResult();
+    const allocatedIds = this.store.allocatedEmployeeIds();
 
-    if (!result) {
-      return [];
-    }
-
-    // This is a simplified approach - in a real app, we'd need to track which employees
-    // are allocated to which department in the simulation result
-    // For now, return employees filtered by lock status or from allocation
-    const allocation = result.allocation[dept] || 0;
-    const locked = this.store.lockedEmployees();
-    const lockedInDept = Object.entries(locked)
-      .filter(([, d]) => d === dept)
-      .map(([id]) => employees.find((e) => e.id === id))
+    const deptEmployeeIds = allocatedIds[dept] || [];
+    const deptEmployees = deptEmployeeIds
+      .map((id) => employees.find((e) => e.id === id))
       .filter((e) => e !== undefined) as Employee[];
-
-    // Add more employees to reach allocation count (simplified)
-    const remaining = employees.filter(
-      (e) => !lockedInDept.some((le) => le.id === e.id)
-    );
-    const additionalCount = Math.max(0, allocation - lockedInDept.length);
-    const filtered = [...lockedInDept, ...remaining.slice(0, additionalCount)];
 
     // Apply search filter
     const search = this.searchFilter().toLowerCase();
-    return filtered
+    return deptEmployees
       .filter((e) =>
         e.id.toLowerCase().includes(search) ||
         e.sales.toString().includes(search) ||

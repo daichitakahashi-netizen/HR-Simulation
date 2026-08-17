@@ -1,0 +1,118 @@
+<div class="scenario-container">
+  <div class="action-bar">
+    <button
+      mat-raised-button
+      color="primary"
+      (click)="saveCurrentAsScenario()"
+      [disabled]="!simResult() || isSaving()"
+      class="save-button"
+    >
+      <mat-icon *ngIf="!isSaving()">add_circle</mat-icon>
+      <mat-progress-spinner
+        *ngIf="isSaving()"
+        diameter="24"
+        mode="indeterminate"
+        class="inline-spinner"
+      ></mat-progress-spinner>
+      {{ isSaving() ? '保存中...' : 'シナリオとして保存' }}
+    </button>
+  </div>
+
+  <div class="scenarios-grid">
+    <div *ngIf="scenarios().length === 0" class="empty-state">
+      <mat-card>
+        <mat-card-content>
+          <p>保存されたシナリオはありません。上のボタンで現在の配置案を保存してください。</p>
+        </mat-card-content>
+      </mat-card>
+    </div>
+
+    <mat-card
+      *ngFor="let scenario of scenarios()"
+      class="scenario-card"
+      [attr.data-scenario-id]="scenario.id"
+    >
+      <mat-card-header>
+        <mat-card-title-group>
+          <mat-card-title>{{ getObjectiveLabel(scenario.objective) }}</mat-card-title>
+          <mat-card-subtitle>
+            {{ scenario.timestamp ? (scenario.timestamp | date: 'yyyy/MM/dd HH:mm') : '保存時刻未設定' }}
+          </mat-card-subtitle>
+        </mat-card-title-group>
+      </mat-card-header>
+
+      <mat-card-content>
+        <div class="kpi-summary">
+          <div class="kpi-item">
+            <span class="kpi-label">全社売上</span>
+            <span class="kpi-value">{{ scenario.totalRevenue.toFixed(1) }}</span>
+          </div>
+          <div class="kpi-item">
+            <span class="kpi-label">全社コスト</span>
+            <span class="kpi-value">{{ scenario.totalCost.toFixed(1) }}</span>
+          </div>
+          <div class="kpi-item">
+            <span class="kpi-label">全社利益</span>
+            <span class="kpi-value profit">{{ scenario.totalProfit.toFixed(1) }}</span>
+          </div>
+        </div>
+
+        <div class="departments-grid">
+          <div class="dept-card" *ngFor="let deptKey of ['A', 'B', 'C']">
+            <div class="dept-header">事業部{{ deptKey }}</div>
+            <div class="dept-details">
+              <div class="detail-row">
+                <span>配置人数:</span>
+                <span>{{ getDepartmentData(scenario, deptKey).allocatedEmployees }}名</span>
+              </div>
+              <div class="detail-row">
+                <span>充足率:</span>
+                <span>{{ (getDepartmentData(scenario, deptKey).fulfillmentRate * 100).toFixed(1) }}%</span>
+              </div>
+              <div class="detail-row">
+                <span>売上:</span>
+                <span>{{ getDepartmentData(scenario, deptKey).finalRevenue.toFixed(1) }}</span>
+              </div>
+              <div class="detail-row">
+                <span>利益:</span>
+                <span>{{ getDepartmentData(scenario, deptKey).profit.toFixed(1) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <mat-form-field class="full-width memo-field">
+          <mat-label>意思決定の背景・理由</mat-label>
+          <textarea
+            matInput
+            rows="4"
+            [value]="reasonMemos()[scenario.id || ''] || scenario.decisionReason"
+            (change)="updateMemo(scenario.id, $any($event.target).value)"
+            placeholder="このシナリオを選択した理由を記入してください"
+          ></textarea>
+        </mat-form-field>
+      </mat-card-content>
+
+      <mat-card-actions>
+        <button
+          mat-button
+          color="primary"
+          (click)="decideScenario(scenario)"
+          class="decide-button"
+        >
+          <mat-icon>check_circle</mat-icon>
+          このシナリオで決定
+        </button>
+        <button
+          mat-button
+          color="warn"
+          (click)="deleteScenario(scenario.id)"
+          class="delete-button"
+        >
+          <mat-icon>delete</mat-icon>
+          削除
+        </button>
+      </mat-card-actions>
+    </mat-card>
+  </div>
+</div>

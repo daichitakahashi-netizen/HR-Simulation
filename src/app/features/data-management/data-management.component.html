@@ -6,11 +6,11 @@
     </mat-card-header>
     <mat-card-content>
       <div class="upload-section">
-        <button mat-raised-button color="primary">
+        <button mat-raised-button color="primary" (click)="openFileDialog()">
           <mat-icon>upload_file</mat-icon>
           CSV ファイルをアップロード
-          <input hidden type="file" accept=".csv" (change)="onFileSelected($event)">
         </button>
+        <input #fileInput hidden type="file" accept=".csv" (change)="onFileSelected($event)">
       </div>
 
       <div class="stats-grid">

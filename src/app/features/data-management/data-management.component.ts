@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatTableModule } from '@angular/material/table';
@@ -9,6 +9,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
+import { CsvParserService } from '../../core/services/csv-parser.service';
 import { Employee } from '../../core/models/simulation.model';
 
 @Component({
@@ -29,6 +30,8 @@ import { Employee } from '../../core/models/simulation.model';
   styleUrl: './data-management.component.scss',
 })
 export class DataManagementComponent implements OnInit {
+  @ViewChild('fileInput') fileInput: any;
+
   readonly pageSize = signal<number>(10);
   readonly pageIndex = signal<number>(0);
   readonly sortField = signal<string>('id');
@@ -36,7 +39,10 @@ export class DataManagementComponent implements OnInit {
 
   displayedColumns: string[] = ['id', 'sales', 'management', 'development', 'nurture', 'personnelCost'];
 
-  constructor(readonly store: SimulationStoreService) {}
+  constructor(
+    readonly store: SimulationStoreService,
+    private csvParserService: CsvParserService
+  ) {}
 
   ngOnInit(): void {
     if (this.store.employees().length === 0) {
@@ -104,12 +110,26 @@ export class DataManagementComponent implements OnInit {
       return;
     }
 
-    // Placeholder for CSV reload functionality
     const reader = new FileReader();
-    reader.onload = () => {
-      // In a real implementation, this would parse and reload the CSV
-      console.log('File selected:', file.name);
+    reader.onload = (e: any) => {
+      try {
+        const csvText = e.target.result;
+        const parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
+        if (parsedEmployees && parsedEmployees.length > 0) {
+          this.store.setEmployees(parsedEmployees);
+          this.pageIndex.set(0); // Reset to first page
+          console.log(`Loaded ${parsedEmployees.length} employees from CSV`);
+        }
+      } catch (error) {
+        console.error('Error parsing CSV:', error);
+      }
     };
     reader.readAsText(file);
+  }
+
+  openFileDialog(): void {
+    if (this.fileInput) {
+      this.fileInput.nativeElement.click();
+    }
   }
 }
