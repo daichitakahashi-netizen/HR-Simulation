@@ -1,0 +1,121 @@
+.container {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.upload-stats-card {
+  mat-card-header {
+    margin-bottom: 20px;
+  }
+}
+
+.upload-section {
+  margin-bottom: 24px;
+
+  button {
+    width: 100%;
+  }
+
+  input {
+    cursor: pointer;
+  }
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.02);
+
+  .label {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.6);
+    margin-bottom: 8px;
+    text-align: center;
+  }
+
+  .value {
+    font-size: 18px;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.87);
+  }
+}
+
+.strengths-weaknesses {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+
+  h3 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.87);
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 6px 12px;
+    background-color: #e3f2fd;
+    color: #1976d2;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .empty {
+    color: rgba(0, 0, 0, 0.4);
+    font-style: italic;
+  }
+}
+
+.employees-card {
+  mat-card-header {
+    margin-bottom: 16px;
+  }
+}
+
+.employees-table {
+  width: 100%;
+  margin-bottom: 16px;
+
+  th {
+    background-color: rgba(0, 0, 0, 0.04);
+    font-weight: 500;
+  }
+
+  tr {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  }
+
+  td, th {
+    padding: 12px 16px;
+    text-align: left;
+  }
+}
+
+::ng-deep .mat-mdc-paginator {
+  background-color: rgba(0, 0, 0, 0.02);
+}

@@ -1,0 +1,115 @@
+<div class="container">
+  <!-- CSV Upload & Statistics Card -->
+  <mat-card class="upload-stats-card">
+    <mat-card-header>
+      <mat-card-title>社員データ管理</mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <div class="upload-section">
+        <button mat-raised-button color="primary">
+          <mat-icon>upload_file</mat-icon>
+          CSV ファイルをアップロード
+          <input hidden type="file" accept=".csv" (change)="onFileSelected($event)">
+        </button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="label">全社員数</div>
+          <div class="value">{{ getTotalEmployees() }}</div>
+        </div>
+
+        <!-- Average Abilities -->
+        <div class="stat-item" *ngIf="getAverageAbilities() as avg">
+          <div class="label">営業力（平均）</div>
+          <div class="value">{{ avg.avgSales.toFixed(1) }}</div>
+        </div>
+        <div class="stat-item" *ngIf="getAverageAbilities() as avg">
+          <div class="label">管理力（平均）</div>
+          <div class="value">{{ avg.avgManagement.toFixed(1) }}</div>
+        </div>
+        <div class="stat-item" *ngIf="getAverageAbilities() as avg">
+          <div class="label">開拓力（平均）</div>
+          <div class="value">{{ avg.avgDevelopment.toFixed(1) }}</div>
+        </div>
+        <div class="stat-item" *ngIf="getAverageAbilities() as avg">
+          <div class="label">育成力（平均）</div>
+          <div class="value">{{ avg.avgNurture.toFixed(1) }}</div>
+        </div>
+      </div>
+
+      <!-- Strengths & Weaknesses -->
+      <div class="strengths-weaknesses" *ngIf="getStrengthsWeaknesses() as sw">
+        <div class="strengths">
+          <h3>強み</h3>
+          <div class="tags">
+            <span class="tag" *ngFor="let strength of sw.strengths">{{ strength }}</span>
+            <span *ngIf="sw.strengths.length === 0" class="empty">なし</span>
+          </div>
+        </div>
+        <div class="weaknesses">
+          <h3>弱み</h3>
+          <div class="tags">
+            <span class="tag" *ngFor="let weakness of sw.weaknesses">{{ weakness }}</span>
+            <span *ngIf="sw.weaknesses.length === 0" class="empty">なし</span>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Employees Table -->
+  <mat-card class="employees-card">
+    <mat-card-header>
+      <mat-card-title>全社員プレビュー</mat-card-title>
+    </mat-card-header>
+    <mat-card-content>
+      <table mat-table [dataSource]="getPaginatedEmployees()" matSort (matSortChange)="onSortChange($event)" class="employees-table">
+        <!-- ID Column -->
+        <ng-container matColumnDef="id">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>ID</th>
+          <td mat-cell *matCellDef="let element">{{ element.id }}</td>
+        </ng-container>
+
+        <!-- Sales Column -->
+        <ng-container matColumnDef="sales">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>営業力</th>
+          <td mat-cell *matCellDef="let element">{{ element.sales }}</td>
+        </ng-container>
+
+        <!-- Management Column -->
+        <ng-container matColumnDef="management">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>管理力</th>
+          <td mat-cell *matCellDef="let element">{{ element.management }}</td>
+        </ng-container>
+
+        <!-- Development Column -->
+        <ng-container matColumnDef="development">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>開拓力</th>
+          <td mat-cell *matCellDef="let element">{{ element.development }}</td>
+        </ng-container>
+
+        <!-- Nurture Column -->
+        <ng-container matColumnDef="nurture">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>育成力</th>
+          <td mat-cell *matCellDef="let element">{{ element.nurture }}</td>
+        </ng-container>
+
+        <!-- Personnel Cost Column -->
+        <ng-container matColumnDef="personnelCost">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>人件費</th>
+          <td mat-cell *matCellDef="let element">{{ element.personnelCost }}</td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+      </table>
+
+      <mat-paginator [pageSizeOptions]="[10, 25, 50, 100]"
+                     [pageSize]="pageSize()"
+                     (page)="onPageChange($event)"
+                     [length]="getTotalEmployees()">
+      </mat-paginator>
+    </mat-card-content>
+  </mat-card>
+</div>

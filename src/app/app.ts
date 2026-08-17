@@ -1,5 +1,5 @@
 import { Component, signal, ViewChild } from '@angular/core';
-import { RouterOutlet, RouterLink } from '@angular/router';
+import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { MatSidenavModule, MatDrawer } from '@angular/material/sidenav';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatNavList, MatListModule } from '@angular/material/list';
@@ -11,6 +11,7 @@ import { MatButtonModule } from '@angular/material/button';
   imports: [
     RouterOutlet,
     RouterLink,
+    RouterLinkActive,
     MatSidenavModule,
     MatToolbarModule,
     MatNavList,

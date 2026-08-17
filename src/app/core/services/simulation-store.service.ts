@@ -20,6 +20,7 @@ export class SimulationStoreService {
   readonly selectedObjective = signal<string>('total_revenue');
   readonly employeeCount = signal<number>(100);
   readonly reasonText = signal<string>('');
+  readonly lockedEmployees = signal<Record<string, string>>({}); // employeeId -> department
 
   constructor(
     private httpClient: HttpClient,
@@ -119,34 +120,71 @@ export class SimulationStoreService {
     this.updateAllocation(newAllocation);
   }
 
-  // Calculate allocation based on objective using heuristic rules
+  // Calculate allocation based on objective using heuristic rules, respecting locked employees
   private calculateAllocationForObjective(objective: string, totalEmployees: number): AllocationMap {
+    const locked = this.lockedEmployees();
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
+
+    // Count locked employees per department
+    Object.entries(locked).forEach(([, dept]) => {
+      if (lockedCounts[dept] !== undefined) {
+        lockedCounts[dept]++;
+      }
+    });
+
     const baseAllocation = totalEmployees === 100
       ? { A: 40, B: 35, C: 25 }
-      : { A: 44, B: 39, C: 27 }; // Dynamic scaling for 110 employees
+      : { A: 44, B: 39, C: 27 };
 
+    let targetAllocation: AllocationMap;
     switch (objective) {
       case 'total_revenue':
-        // Maximize total company revenue: balance across all departments
-        return baseAllocation;
+        targetAllocation = baseAllocation;
+        break;
       case 'a_profit':
-        // Maximize A department profit: increase A, minimize others
-        return totalEmployees === 100
+        targetAllocation = totalEmployees === 100
           ? { A: 50, B: 30, C: 20 }
           : { A: 55, B: 33, C: 22 };
+        break;
       case 'b_revenue':
-        // Maximize B department revenue: increase B
-        return totalEmployees === 100
+        targetAllocation = totalEmployees === 100
           ? { A: 35, B: 45, C: 20 }
           : { A: 38, B: 50, C: 22 };
+        break;
       case 'c_revenue':
-        // Maximize C department revenue: concentrate on C with high development
-        return totalEmployees === 100
+        targetAllocation = totalEmployees === 100
           ? { A: 30, B: 30, C: 40 }
           : { A: 33, B: 33, C: 44 };
+        break;
       default:
-        return baseAllocation;
+        targetAllocation = baseAllocation;
     }
+
+    // Adjust allocation to respect locked employees
+    const lockedTotal = Object.values(lockedCounts).reduce((a, b) => a + b, 0);
+    const remainingEmployees = totalEmployees - lockedTotal;
+    const baseTotal = Object.values(baseAllocation).reduce((a, b) => a + b, 0);
+
+    // Scale target allocation proportionally for remaining employees
+    const scaledAllocation: AllocationMap = {};
+    let totalScaled = 0;
+
+    Object.entries(targetAllocation).forEach(([dept, count]) => {
+      const proportion = count / baseTotal;
+      const scaledCount = Math.round(proportion * remainingEmployees);
+      scaledAllocation[dept] = lockedCounts[dept] + scaledCount;
+      totalScaled += scaledCount;
+    });
+
+    // Adjust for rounding errors
+    const diff = totalEmployees - Object.values(scaledAllocation).reduce((a, b) => a + b, 0);
+    if (diff !== 0) {
+      // Add/subtract from the largest department
+      const largestDept = Object.entries(scaledAllocation).sort(([, a], [, b]) => b - a)[0][0];
+      scaledAllocation[largestDept] += diff;
+    }
+
+    return scaledAllocation;
   }
 
   // Set employee count and reload data
@@ -201,6 +239,57 @@ export class SimulationStoreService {
     this.simulationResult.set(result);
   }
 
+  // Toggle lock state for an employee
+  toggleLock(employeeId: string, department: string): void {
+    const locked = { ...this.lockedEmployees() };
+    if (locked[employeeId] === department) {
+      delete locked[employeeId];
+    } else {
+      locked[employeeId] = department;
+    }
+    this.lockedEmployees.set(locked);
+  }
+
+  // Get average abilities across all employees and determine strengths/weaknesses
+  getAverageAbilities() {
+    const emps = this.employees();
+    if (emps.length === 0) {
+      return {
+        avgSales: 0,
+        avgManagement: 0,
+        avgDevelopment: 0,
+        avgNurture: 0,
+        overallAvg: 0,
+      };
+    }
+    const avgSales = emps.reduce((sum, e) => sum + e.sales, 0) / emps.length;
+    const avgManagement = emps.reduce((sum, e) => sum + e.management, 0) / emps.length;
+    const avgDevelopment = emps.reduce((sum, e) => sum + e.development, 0) / emps.length;
+    const avgNurture = emps.reduce((sum, e) => sum + e.nurture, 0) / emps.length;
+    const overallAvg = (avgSales + avgManagement + avgDevelopment + avgNurture) / 4;
+    return { avgSales, avgManagement, avgDevelopment, avgNurture, overallAvg };
+  }
+
+  // Get strengths and weaknesses
+  getStrengthsWeaknesses() {
+    const avg = this.getAverageAbilities();
+    const overallAvg = avg.overallAvg;
+    return {
+      strengths: [
+        avg.avgSales > overallAvg ? '営業力' : null,
+        avg.avgManagement > overallAvg ? '管理力' : null,
+        avg.avgDevelopment > overallAvg ? '開拓力' : null,
+        avg.avgNurture > overallAvg ? '育成力' : null,
+      ].filter((s) => s !== null) as string[],
+      weaknesses: [
+        avg.avgSales < overallAvg ? '営業力' : null,
+        avg.avgManagement < overallAvg ? '管理力' : null,
+        avg.avgDevelopment < overallAvg ? '開拓力' : null,
+        avg.avgNurture < overallAvg ? '育成力' : null,
+      ].filter((w) => w !== null) as string[],
+    };
+  }
+
   // Get current state as object (for debugging/testing)
   getState() {
     return {
@@ -211,6 +300,7 @@ export class SimulationStoreService {
       selectedObjective: this.selectedObjective(),
       employeeCount: this.employeeCount(),
       reasonText: this.reasonText(),
+      lockedEmployees: this.lockedEmployees(),
     };
   }
 }

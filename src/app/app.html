@@ -1,9 +1,17 @@
 <mat-sidenav-container class="sidenav-container">
   <mat-sidenav #drawer mode="side" opened="true">
     <mat-nav-list>
-      <mat-list-item routerLink="/dashboard">
+      <mat-list-item routerLink="/dashboard" routerLinkActive="active">
         <mat-icon matListItemIcon>dashboard</mat-icon>
         <span matListItemTitle>ダッシュボード</span>
+      </mat-list-item>
+      <mat-list-item routerLink="/department-analysis" routerLinkActive="active">
+        <mat-icon matListItemIcon>domain</mat-icon>
+        <span matListItemTitle>事業部別分析</span>
+      </mat-list-item>
+      <mat-list-item routerLink="/data-management" routerLinkActive="active">
+        <mat-icon matListItemIcon>data_usage</mat-icon>
+        <span matListItemTitle>社員データ管理</span>
       </mat-list-item>
     </mat-nav-list>
   </mat-sidenav>
