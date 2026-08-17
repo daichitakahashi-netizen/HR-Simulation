@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
@@ -26,6 +26,10 @@ export class ReportComponent implements OnInit {
   employees = signal<any[]>([]);
   allocation = signal<Record<string, number>>({});
   warnings = signal<string[]>([]);
+  revenueLessThan58B = computed(() => {
+    const result = this.simulationResult();
+    return result ? result.summary.totalRevenue < 5.8 : false;
+  });
   now = new Date();
 
   private departmentConfigs: Record<string, DepartmentConfig> = {

@@ -23,6 +23,52 @@
   margin: 0 auto;
 }
 
+.critical-warning-section {
+  margin-bottom: 24px;
+}
+
+.critical-warning-card {
+  border-left: 6px solid #d32f2f;
+  background-color: #ffebee;
+
+  .critical-warning-content {
+    padding: 16px;
+  }
+}
+
+.critical-warning-content {
+  .warning-badge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 12px;
+    background-color: #ffcdd2;
+    border-radius: 4px;
+
+    .warning-badge-icon {
+      color: #d32f2f;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+
+    .warning-badge-text {
+      color: #d32f2f;
+      font-weight: 600;
+      font-size: 16px;
+    }
+  }
+
+  .warning-description {
+    color: #b71c1c;
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.5;
+  }
+}
+
 .warnings-section {
   margin-bottom: 24px;
 }

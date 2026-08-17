@@ -8,7 +8,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { FormsModule } from '@angular/forms';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
-import { ScenarioRepositoryService } from '../../core/services/scenario-repository.service';
+import { FirestoreService } from '../../core/services/firestore.service';
 import { ScenarioSummary } from '../../core/models/scenario.model';
 
 @Component({
@@ -38,7 +38,7 @@ export class ScenarioComparisonComponent implements OnInit {
 
   constructor(
     private simulationStore: SimulationStoreService,
-    private scenarioRepository: ScenarioRepositoryService
+    private firestoreService: FirestoreService
   ) {}
 
   ngOnInit(): void {
@@ -47,7 +47,7 @@ export class ScenarioComparisonComponent implements OnInit {
 
   async loadScenarios(): Promise<void> {
     try {
-      const loaded = await this.scenarioRepository.getScenarios();
+      const loaded = await this.firestoreService.getScenarioSummaries();
       this.scenarios.set(loaded);
     } catch (error) {
       console.error('Failed to load scenarios:', error);
@@ -96,7 +96,8 @@ export class ScenarioComparisonComponent implements OnInit {
         decisionReason: this.reasonText(),
       };
 
-      await this.scenarioRepository.saveScenario(scenario);
+      // Save to Firestore (with LocalStorage fallback)
+      await this.firestoreService.saveScenarioSummary(scenario);
       await this.loadScenarios();
     } catch (error) {
       console.error('Failed to save scenario:', error);
@@ -119,7 +120,8 @@ export class ScenarioComparisonComponent implements OnInit {
     };
 
     try {
-      await this.scenarioRepository.saveScenario(updatedScenario);
+      // Save to Firestore (with LocalStorage fallback)
+      await this.firestoreService.saveScenarioSummary(updatedScenario);
       alert('シナリオが決定・保存されました');
     } catch (error) {
       console.error('Failed to save decision:', error);
@@ -133,7 +135,7 @@ export class ScenarioComparisonComponent implements OnInit {
     }
 
     try {
-      await this.scenarioRepository.deleteScenario(id);
+      await this.firestoreService.deleteScenarioSummary(id);
       await this.loadScenarios();
     } catch (error) {
       console.error('Failed to delete scenario:', error);

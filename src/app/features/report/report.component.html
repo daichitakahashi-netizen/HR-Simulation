@@ -12,6 +12,22 @@
 </div>
 
 <div class="report-content">
+  <!-- Critical Warning: Revenue < 5.8B yen -->
+  <div *ngIf="revenueLessThan58B()" class="critical-warning-section">
+    <mat-card class="critical-warning-card">
+      <mat-card-content class="critical-warning-content">
+        <div class="warning-badge">
+          <mat-icon class="warning-badge-icon">error</mat-icon>
+          <span class="warning-badge-text">全社売上が目標（58億円）に達していません</span>
+        </div>
+        <p class="warning-description">
+          現在のシミュレーション結果の全社売上は{{ (simulationResult()?.summary?.totalRevenue ?? 0).toFixed(1) }}億円です。
+          配置計画の見直しをご検討ください。
+        </p>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
   <!-- Warnings Section -->
   <div *ngIf="(warnings() || []).length > 0" class="warnings-section">
     <mat-card class="warning-card">
