@@ -206,7 +206,61 @@ export class SimulationEngineService {
     };
   }
 
-  // Run simulation
+  // Run simulation with allocated employee IDs
+  simulateWithAllocation(
+    employees: Employee[],
+    allocatedIds: Record<string, string[]>,
+    totalEmployees: number
+  ): AllocationResult {
+    const result: AllocationResult = {
+      allocation: {
+        A: allocatedIds['A'].length,
+        B: allocatedIds['B'].length,
+        C: allocatedIds['C'].length,
+      },
+      department: {},
+      summary: {
+        totalRevenue: 0,
+        totalCost: 0,
+        totalProfit: 0,
+      },
+    };
+
+    let totalRevenue = 0;
+    let totalCost = 0;
+    let totalProfit = 0;
+
+    // Calculate for each department
+    for (const dept of Object.values(Department)) {
+      const deptEmployeeIds = allocatedIds[dept] || [];
+      const deptEmployees = employees.filter((emp) =>
+        deptEmployeeIds.includes(emp.id)
+      );
+      const allocatedCount = deptEmployees.length;
+
+      const deptResult = this.calculateDepartmentResult(
+        deptEmployees,
+        allocatedCount,
+        dept,
+        totalEmployees
+      );
+
+      result.department[dept] = deptResult;
+      totalRevenue += deptResult.finalRevenue;
+      totalCost += deptResult.cost;
+      totalProfit += deptResult.profit;
+    }
+
+    result.summary = {
+      totalRevenue,
+      totalCost,
+      totalProfit,
+    };
+
+    return result;
+  }
+
+  // Run simulation (legacy - kept for compatibility)
   simulate(
     employees: Employee[],
     allocation: Record<string, number>,

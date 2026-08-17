@@ -62,28 +62,23 @@ export class SimulationStoreService {
 
           const totalEmployees = is110Mode ? 110 : employees.length;
           const lockedEmployees = this.lockedEmployees();
-          const allocation = this.simulationEngineService.calculateOptimalAllocation(
-            employees,
-            objective,
-            lockedEmployees
-          );
           const allocatedIds = this.simulationEngineService.getAllocatedEmployeeMapping(
             employees,
             objective,
             lockedEmployees
           );
-          const result = this.simulationEngineService.simulate(
+          const result = this.simulationEngineService.simulateWithAllocation(
             employees,
-            allocation,
+            allocatedIds,
             totalEmployees
           );
 
           this.simulationResult$.next(result);
           this.simulationResult.set(result);
-          this.allocation.set(allocation);
+          this.allocation.set(result.allocation);
           this.allocatedEmployeeIds.set(allocatedIds);
 
-          const reasoningText = this.generateReasoningText(result, objective);
+          const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
           this.reasoningText$.next(reasoningText);
           this.reasonText.set(reasoningText);
 
@@ -223,36 +218,106 @@ export class SimulationStoreService {
     this.triggerRecalculation();
   }
 
-  private generateReasoningText(result: AllocationResult, objective: DepartmentObjective): string {
+  private generateReasoningText(
+    result: AllocationResult,
+    objective: DepartmentObjective,
+    employees: Employee[],
+    allocatedIds: Record<string, string[]>
+  ): string {
     const deptA = result.department['A'];
     const deptB = result.department['B'];
     const deptC = result.department['C'];
 
-    const departments = [
-      { name: 'A事業部', profit: deptA.profit, revenue: deptA.finalRevenue },
-      { name: 'B事業部', profit: deptB.profit, revenue: deptB.finalRevenue },
-      { name: 'C事業部', profit: deptC.profit, revenue: deptC.finalRevenue },
-    ];
-
+    // Map objective to human-readable text
     let objectiveText = '';
-    let maxDeptName = 'A事業部';
-
+    let targetDept = '';
     if (objective === 'totalRevenue') {
       objectiveText = '全社売上最大化';
     } else if (objective === 'departmentAProfitMaximize') {
-      objectiveText = 'A事業部の利益最大化';
-      maxDeptName = 'A事業部';
+      objectiveText = 'A事業部利益最大化';
+      targetDept = 'A';
     } else if (objective === 'departmentBRevenueMaximize') {
-      objectiveText = 'B事業部の売上最大化';
-      maxDeptName = 'B事業部';
+      objectiveText = 'B事業部売上最大化';
+      targetDept = 'B';
     } else if (objective === 'departmentCRevenueMaximize') {
-      objectiveText = 'C事業部の売上最大化';
-      maxDeptName = 'C事業部';
+      objectiveText = 'C事業部売上最大化';
+      targetDept = 'C';
     }
 
-    const totalCost = result.summary.totalCost.toFixed(1);
-    const totalRevenue = result.summary.totalRevenue.toFixed(1);
+    // Find department with highest final revenue growth
+    const departments = [
+      { code: 'A', name: 'A事業部', finalRevenue: deptA.finalRevenue, baseRevenue: deptA.baseRevenue },
+      { code: 'B', name: 'B事業部', finalRevenue: deptB.finalRevenue, baseRevenue: deptB.baseRevenue },
+      { code: 'C', name: 'C事業部', finalRevenue: deptC.finalRevenue, baseRevenue: deptC.baseRevenue },
+    ];
 
-    return `【${objectiveText}】を達成するため、成長率と能力値のバランスから【${maxDeptName}】へ優先的に人材を配置しました。また、各事業部の最低要員を確保しつつ、各部門の充足率を最適化することで、全社コストを【${totalCost}億円】に抑え、最終的に【${totalRevenue}億円】を実現しました。`;
+    // Calculate growth from base for each department
+    const deptGrowth = departments.map((d) => ({
+      ...d,
+      growth: d.finalRevenue - d.baseRevenue,
+    }));
+
+    // Determine dominant department (highest final revenue when objective is totalRevenue)
+    let dominantDept = deptGrowth.reduce((prev, curr) =>
+      curr.finalRevenue > prev.finalRevenue ? curr : prev
+    );
+
+    // If specific objective, that becomes dominant
+    if (targetDept) {
+      dominantDept = deptGrowth.find((d) => d.code === targetDept) || dominantDept;
+    }
+
+    // Identify which skills were leveraged (top allocated employees' dominant skills)
+    const dominantAllocatedIds = allocatedIds[dominantDept.code];
+    const allocatedEmployees = dominantAllocatedIds
+      .map((id) => employees.find((e) => e.id === id))
+      .filter((e) => e !== undefined) as Employee[];
+
+    const skillScores = {
+      sales: allocatedEmployees.reduce((sum, e) => sum + e.sales, 0) / Math.max(allocatedEmployees.length, 1),
+      management: allocatedEmployees.reduce((sum, e) => sum + e.management, 0) / Math.max(allocatedEmployees.length, 1),
+      development: allocatedEmployees.reduce((sum, e) => sum + e.development, 0) / Math.max(allocatedEmployees.length, 1),
+      nurture: allocatedEmployees.reduce((sum, e) => sum + e.nurture, 0) / Math.max(allocatedEmployees.length, 1),
+    };
+
+    const dominantSkill = Object.entries(skillScores).reduce((prev, curr) =>
+      curr[1] > prev[1] ? curr : prev
+    );
+
+    const skillNameMap: Record<string, string> = {
+      sales: '営業力',
+      management: '管理力',
+      development: '開拓力',
+      nurture: '育成力',
+    };
+
+    // Identify avoided penalties
+    const avoidedPenalties = [];
+    if (deptA.fulfillmentRate >= 0.7) {
+      avoidedPenalties.push('A事業部の人員不足ペナルティ');
+    }
+    if (deptB.fulfillmentRate >= 0.7) {
+      avoidedPenalties.push('B事業部の人員不足ペナルティ');
+    }
+    if (deptC.fulfillmentRate >= 0.7) {
+      avoidedPenalties.push('C事業部の人員不足ペナルティ');
+    }
+
+    // Build reasoning text
+    const totalRevenue = result.summary.totalRevenue.toFixed(1);
+    const totalCost = result.summary.totalCost.toFixed(1);
+
+    let reasoning = `【${objectiveText}】を実現するため、${dominantDept.name}を中心に配置しました。`;
+    reasoning += `${dominantDept.name}には${skillNameMap[dominantSkill[0]]}に優れた人材を集約し、最大の売上向上効果を実現しています。`;
+
+    if (avoidedPenalties.length > 0) {
+      reasoning += `${avoidedPenalties.join('および')}を回避し、`;
+    } else {
+      reasoning += `各事業部の最低要員確保を成功させ、`;
+    }
+
+    reasoning += `全社コスト${totalCost}億円で売上${totalRevenue}億円を達成しました。`;
+
+    return reasoning;
   }
 }
