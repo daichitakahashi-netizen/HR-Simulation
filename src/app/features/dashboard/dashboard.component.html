@@ -10,22 +10,25 @@
   <!-- Left Column: Control & Policy Panel -->
   <div class="left-panel">
     <!-- Purpose Selection -->
-    <mat-form-field appearance="outline" class="full-width">
-      <mat-label>目的選択</mat-label>
-      <mat-select [value]="selectedObjective()" (selectionChange)="onObjectiveChange($event.value)">
+    <div class="objective-section">
+      <h3 class="section-title">目的選択</h3>
+      <mat-radio-group [value]="selectedObjective()" (change)="onObjectiveChange($event.value)" class="radio-group">
         @for (obj of objectives; track obj.value) {
-          <mat-option [value]="obj.value">{{ obj.label }}</mat-option>
+          <mat-radio-button [value]="obj.value" class="radio-button">
+            {{ obj.label }}
+          </mat-radio-button>
         }
-      </mat-select>
-    </mat-form-field>
+      </mat-radio-group>
+    </div>
 
     <!-- 110 Name Toggle -->
-    <mat-slide-toggle
-      class="toggle-item"
-      [checked]="employeeCount() === 110"
-      (change)="onEmployeeCountToggle($event.checked)">
-      110名配置へ切り替え
-    </mat-slide-toggle>
+    <div class="toggle-section">
+      <h3 class="section-title">人数切り替え</h3>
+      <mat-button-toggle-group [value]="employeeCount()" (change)="onEmployeeCountChange($event.value)" class="toggle-group">
+        <mat-button-toggle [value]="100">100名（採用前）</mat-button-toggle>
+        <mat-button-toggle [value]="110">110名（採用後）</mat-button-toggle>
+      </mat-button-toggle-group>
+    </div>
 
     <!-- Allocation Reason -->
     <mat-expansion-panel class="reason-panel">
@@ -56,6 +59,17 @@
                 —
               }
             </div>
+            @if (is110Mode() && kpiDifferences()) {
+              <mat-chip-set aria-label="差分表示">
+                <mat-chip highlighted [highlighted]="kpiDifferences()!.revenueDiff >= 0" class="diff-chip">
+                  @if (kpiDifferences()!.revenueDiff >= 0) {
+                    + {{ kpiDifferences()!.revenueDiff | number: '1.1-1' }}
+                  } @else {
+                    {{ kpiDifferences()!.revenueDiff | number: '1.1-1' }}
+                  }
+                </mat-chip>
+              </mat-chip-set>
+            }
           </mat-card-content>
         </mat-card>
 
@@ -69,6 +83,17 @@
                 —
               }
             </div>
+            @if (is110Mode() && kpiDifferences()) {
+              <mat-chip-set aria-label="差分表示">
+                <mat-chip highlighted [highlighted]="kpiDifferences()!.costDiff <= 0" class="diff-chip">
+                  @if (kpiDifferences()!.costDiff >= 0) {
+                    + {{ kpiDifferences()!.costDiff | number: '1.1-1' }}
+                  } @else {
+                    {{ kpiDifferences()!.costDiff | number: '1.1-1' }}
+                  }
+                </mat-chip>
+              </mat-chip-set>
+            }
           </mat-card-content>
         </mat-card>
 
@@ -82,8 +107,58 @@
                 —
               }
             </div>
+            @if (is110Mode() && kpiDifferences()) {
+              <mat-chip-set aria-label="差分表示">
+                <mat-chip highlighted [highlighted]="kpiDifferences()!.profitDiff >= 0" class="diff-chip">
+                  @if (kpiDifferences()!.profitDiff >= 0) {
+                    + {{ kpiDifferences()!.profitDiff | number: '1.1-1' }}
+                  } @else {
+                    {{ kpiDifferences()!.profitDiff | number: '1.1-1' }}
+                  }
+                </mat-chip>
+              </mat-chip-set>
+            }
           </mat-card-content>
         </mat-card>
+      </div>
+
+      <!-- Three Independent Donut Charts -->
+      <div class="charts-wrapper">
+        <div class="chart-card">
+          <h3 class="chart-title">全社売上構成</h3>
+          <div class="chart-container">
+            <canvas
+              baseChart
+              [type]="donutChartType"
+              [data]="revenueChartData()"
+              [options]="donutChartOptions">
+            </canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <h3 class="chart-title">全社コスト構成</h3>
+          <div class="chart-container">
+            <canvas
+              baseChart
+              [type]="donutChartType"
+              [data]="costChartData()"
+              [options]="donutChartOptions">
+            </canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <h3 class="chart-title">全社利益構成</h3>
+          <div class="chart-container">
+            <canvas
+              baseChart
+              [type]="donutChartType"
+              [data]="profitChartData()"
+              [options]="donutChartOptions">
+            </canvas>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -148,6 +223,17 @@
                     </div>
                   </mat-expansion-panel>
                 </mat-accordion>
+
+                <!-- View Members Button -->
+                <div class="member-button-container">
+                  <button
+                    mat-raised-button
+                    color="primary"
+                    (click)="openMemberDialog(dept.id, dept.label)"
+                    class="member-button">
+                    配置メンバー一覧を見る
+                  </button>
+                </div>
               } @else {
                 <p>データ読み込み中...</p>
               }
