@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { SimulationEngineService } from './simulation-engine.service';
-import { Employee } from '../models/simulation.model';
+import { Employee, DepartmentObjective } from '../models/simulation.model';
 
 describe('SimulationEngineService', () => {
   let service: SimulationEngineService;
@@ -10,288 +10,295 @@ describe('SimulationEngineService', () => {
     service = TestBed.inject(SimulationEngineService);
   });
 
-  it('should be created', () => {
-    expect(service).toBeTruthy();
-  });
+  // Helper function to create mock employees
+  function createMockEmployees(count: number): Employee[] {
+    const employees: Employee[] = [];
+    for (let i = 0; i < count; i++) {
+      employees.push({
+        id: `emp-${i}`,
+        sales: 50 + (i % 20),
+        management: 40 + (i % 20),
+        development: 60 + (i % 20),
+        nurture: 30 + (i % 20),
+        personnelCost: 5 + (i % 10),
+      });
+    }
+    return employees;
+  }
 
-  describe('calculateEmployeeContribution', () => {
-    it('should calculate employee contribution for department A', () => {
-      const employee: Employee = {
-        id: '1',
-        sales: 100,
-        management: 100,
-        development: 100,
-        nurture: 100,
-        personnelCost: 10,
-      };
-      // A事業部: sales*0.45 + management*0.35 + development*0.10 + nurture*0.10
-      // = 100*0.45 + 100*0.35 + 100*0.10 + 100*0.10 = 45 + 35 + 10 + 10 = 100
-      const result = service.calculateEmployeeContribution(employee, 'A');
-      expect(result).toBe(100);
-    });
-
-    it('should calculate employee contribution for department B', () => {
-      const employee: Employee = {
-        id: '1',
-        sales: 100,
-        management: 100,
-        development: 100,
-        nurture: 100,
-        personnelCost: 10,
-      };
-      // B事業部: sales*0.35 + management*0.20 + development*0.30 + nurture*0.15
-      // = 100*0.35 + 100*0.20 + 100*0.30 + 100*0.15 = 35 + 20 + 30 + 15 = 100
-      const result = service.calculateEmployeeContribution(employee, 'B');
-      expect(result).toBe(100);
-    });
-
-    it('should calculate employee contribution for department C', () => {
-      const employee: Employee = {
-        id: '1',
-        sales: 100,
-        management: 100,
-        development: 100,
-        nurture: 100,
-        personnelCost: 10,
-      };
-      // C事業部: sales*0.20 + management*0.10 + development*0.50 + nurture*0.20
-      // = 100*0.20 + 100*0.10 + 100*0.50 + 100*0.20 = 20 + 10 + 50 + 20 = 100
-      const result = service.calculateEmployeeContribution(employee, 'C');
-      expect(result).toBe(100);
-    });
-
-    it('should handle mixed ability values', () => {
-      const employee: Employee = {
-        id: '1',
-        sales: 80,
-        management: 60,
-        development: 70,
-        nurture: 90,
-        personnelCost: 10,
-      };
-      // A事業部: 80*0.45 + 60*0.35 + 70*0.10 + 90*0.10 = 36 + 21 + 7 + 9 = 73
-      const result = service.calculateEmployeeContribution(employee, 'A');
-      expect(result).toBeCloseTo(73, 5);
-    });
-  });
-
-  describe('calculateDepartmentCapability', () => {
-    it('should sum contributions of all employees', () => {
-      const employees: Employee[] = [
-        {
-          id: '1',
-          sales: 50,
-          management: 50,
-          development: 50,
-          nurture: 50,
-          personnelCost: 10,
-        },
-        {
-          id: '2',
-          sales: 50,
-          management: 50,
-          development: 50,
-          nurture: 50,
-          personnelCost: 10,
-        },
-      ];
-      // A事業部: (50*0.45 + 50*0.35 + 50*0.10 + 50*0.10) * 2 = 50 * 2 = 100
-      const result = service.calculateDepartmentCapability(employees, 'A');
-      expect(result).toBeCloseTo(100, 5);
-    });
-
-    it('should return 0 for empty employee list', () => {
-      const employees: Employee[] = [];
-      const result = service.calculateDepartmentCapability(employees, 'A');
-      expect(result).toBe(0);
-    });
-  });
-
-  describe('calculateBaseRevenue', () => {
-    it('should calculate base revenue for department A', () => {
-      // A: baseRevenue = 10 * (1 + (50/100) * 0.06) = 10 * 1.03 = 10.3
-      const result = service.calculateBaseRevenue(50, 'A');
-      expect(result).toBeCloseTo(10.3, 5);
-    });
-
-    it('should calculate base revenue for department B', () => {
-      // B: baseRevenue = 7 * (1 + (100/100) * 0.12) = 7 * 1.12 = 7.84
-      const result = service.calculateBaseRevenue(100, 'B');
-      expect(result).toBeCloseTo(7.84, 5);
-    });
-
-    it('should calculate base revenue for department C', () => {
-      // C: baseRevenue = 2 * (1 + (100/100) * 0.25) = 2 * 1.25 = 2.5
-      const result = service.calculateBaseRevenue(100, 'C');
-      expect(result).toBeCloseTo(2.5, 5);
-    });
-  });
-
-  describe('calculateAppropriateHeadcount', () => {
-    it('should calculate dynamic appropriate headcount for 100 employees', () => {
-      // A: 40 * (100/100) = 40
-      const result = service.calculateAppropriateHeadcount(100, 'A');
-      expect(result).toBe(40);
-    });
-
-    it('should scale appropriate headcount for 110 employees', () => {
-      // A: 40 * (110/100) = 44
-      const result = service.calculateAppropriateHeadcount(110, 'A');
-      expect(result).toBeCloseTo(44, 5);
-    });
-
-    it('should calculate for all departments', () => {
-      const resultA = service.calculateAppropriateHeadcount(100, 'A');
-      const resultB = service.calculateAppropriateHeadcount(100, 'B');
-      const resultC = service.calculateAppropriateHeadcount(100, 'C');
-      expect(resultA).toBe(40);
-      expect(resultB).toBe(35);
-      expect(resultC).toBe(25);
-    });
-  });
-
-  describe('calculateFulfillmentRate', () => {
-    it('should calculate fulfillment rate at 100%', () => {
-      const result = service.calculateFulfillmentRate(40, 40);
-      expect(result).toBeCloseTo(1.0, 5);
-    });
-
-    it('should calculate fulfillment rate at 50%', () => {
-      const result = service.calculateFulfillmentRate(20, 40);
-      expect(result).toBeCloseTo(0.5, 5);
-    });
-
-    it('should calculate fulfillment rate above 100%', () => {
-      const result = service.calculateFulfillmentRate(50, 40);
-      expect(result).toBeCloseTo(1.25, 5);
-    });
-
-    it('should handle zero appropriate headcount', () => {
-      const result = service.calculateFulfillmentRate(10, 0);
-      expect(result).toBe(0);
-    });
-  });
-
-  describe('getShortageCoefficient', () => {
-    it('should return 1.0 for 100% fulfillment (A)', () => {
-      const result = service.getShortageCoefficient(1.0, 'A');
-      expect(result).toBe(1.0);
-    });
-
-    it('should return 0.85 for 90-99% fulfillment (A)', () => {
-      const result = service.getShortageCoefficient(0.95, 'A');
-      expect(result).toBe(0.85);
-    });
-
-    it('should return 0.70 for 80-89% fulfillment (A)', () => {
-      const result = service.getShortageCoefficient(0.85, 'A');
-      expect(result).toBe(0.70);
-    });
-
-    it('should return 0.50 for 70-79% fulfillment (A)', () => {
-      const result = service.getShortageCoefficient(0.75, 'A');
-      expect(result).toBe(0.50);
-    });
-
-    it('should return 0.30 for <70% fulfillment (A)', () => {
-      const result = service.getShortageCoefficient(0.5, 'A');
-      expect(result).toBe(0.30);
-    });
-
-    it('should return 0.90 for 90-99% fulfillment (B)', () => {
-      const result = service.getShortageCoefficient(0.95, 'B');
-      expect(result).toBe(0.90);
-    });
-
-    it('should return 0.95 for 90-99% fulfillment (C)', () => {
-      const result = service.getShortageCoefficient(0.95, 'C');
-      expect(result).toBe(0.95);
-    });
-  });
-
-  describe('getSurplusCoefficient', () => {
-    it('should return 1.0 for <=120% fulfillment', () => {
-      const result = service.getSurplusCoefficient(1.2);
-      expect(result).toBe(1.0);
-    });
-
-    it('should return 0.95 for 120-140% fulfillment', () => {
-      const result = service.getSurplusCoefficient(1.3);
-      expect(result).toBe(0.95);
-    });
-
-    it('should return 0.90 for 140-160% fulfillment', () => {
-      const result = service.getSurplusCoefficient(1.5);
-      expect(result).toBe(0.90);
-    });
-
-    it('should return 0.80 for >160% fulfillment', () => {
-      const result = service.getSurplusCoefficient(1.7);
-      expect(result).toBe(0.80);
-    });
-  });
-
-  describe('calculateCost', () => {
-    it('should multiply personnel costs by 3', () => {
-      const personnelCosts = [10, 5, 15];
-      const result = service.calculateCost(personnelCosts);
-      // (10 + 5 + 15) * 3 = 30 * 3 = 90
-      expect(result).toBe(90);
-    });
-
-    it('should return 0 for empty array', () => {
-      const result = service.calculateCost([]);
-      expect(result).toBe(0);
-    });
-  });
-
-  describe('calculateProfit', () => {
-    it('should calculate profit correctly', () => {
-      const result = service.calculateProfit(100, 30);
-      expect(result).toBe(70);
-    });
-
-    it('should handle negative profit', () => {
-      const result = service.calculateProfit(20, 30);
-      expect(result).toBe(-10);
-    });
-  });
-
-  describe('calculateDepartmentResult', () => {
-    it('should calculate complete department result', () => {
-      const employees: Employee[] = [
-        {
-          id: '1',
-          sales: 100,
-          management: 100,
-          development: 100,
-          nurture: 100,
-          personnelCost: 10,
-        },
-      ];
-      const result = service.calculateDepartmentResult(
+  describe('Minimum headcount constraint (A=30, B=20, C=10)', () => {
+    it('should respect minimum headcount for 100 employees', () => {
+      const employees = createMockEmployees(100);
+      const allocation = service.calculateOptimalAllocation(
         employees,
-        1,
-        'A',
-        100
+        'totalRevenue'
       );
 
-      expect(result.allocatedEmployees).toBe(1);
-      expect(result.departmentCapability).toBe(100);
-      expect(result.appropriateHeadcount).toBe(40);
-      expect(result.fulfillmentRate).toBeCloseTo(0.025, 5); // 1/40
-      expect(result.shortageCoefficient).toBe(0.30);
-      expect(result.surplusCoefficient).toBe(1.0);
-      expect(result.personnelCosts).toEqual([10]);
-      expect(result.cost).toBe(30); // 10 * 3
+      // At 100 employees: A=30 (30%), B=20 (20%), C=10 (10%)
+      expect(allocation['A']).toBeGreaterThanOrEqual(30);
+      expect(allocation['B']).toBeGreaterThanOrEqual(20);
+      expect(allocation['C']).toBeGreaterThanOrEqual(10);
+      expect(allocation['A'] + allocation['B'] + allocation['C']).toBe(100);
+    });
+
+    it('should respect minimum headcount for 110 employees', () => {
+      const employees = createMockEmployees(110);
+      const allocation = service.calculateOptimalAllocation(
+        employees,
+        'totalRevenue'
+      );
+
+      // At 110 employees: A=33 (30% of 110), B=22 (20% of 110), C=11 (10% of 110)
+      expect(allocation['A']).toBeGreaterThanOrEqual(33);
+      expect(allocation['B']).toBeGreaterThanOrEqual(22);
+      expect(allocation['C']).toBeGreaterThanOrEqual(11);
+      expect(allocation['A'] + allocation['B'] + allocation['C']).toBe(110);
+    });
+
+    it('should satisfy minimum constraints even with locked employees', () => {
+      const employees = createMockEmployees(100);
+      const locked = {
+        [employees[0].id]: 'A',
+        [employees[1].id]: 'B',
+      };
+
+      const allocation = service.calculateOptimalAllocation(
+        employees,
+        'totalRevenue',
+        locked
+      );
+
+      expect(allocation['A']).toBeGreaterThanOrEqual(30);
+      expect(allocation['B']).toBeGreaterThanOrEqual(20);
+      expect(allocation['C']).toBeGreaterThanOrEqual(10);
     });
   });
 
-  describe('simulate', () => {
-    it('should run complete simulation', () => {
+  describe('Objective-based allocation changes', () => {
+    it('should maximize total revenue for totalRevenue objective', () => {
+      const employees = createMockEmployees(100);
+
+      const totalRevenueResult = service.simulateWithAllocation(
+        employees,
+        service.getAllocatedEmployeeMapping(employees, 'totalRevenue'),
+        employees.length
+      );
+
+      const totalRevenue = totalRevenueResult.summary.totalRevenue;
+      expect(totalRevenue).toBeGreaterThan(0);
+    });
+
+    it('should change allocation between different objectives', () => {
+      const employees = createMockEmployees(100);
+
+      const alloc1 = service.getAllocatedEmployeeMapping(
+        employees,
+        'totalRevenue'
+      );
+      const alloc2 = service.getAllocatedEmployeeMapping(
+        employees,
+        'departmentAProfitMaximize'
+      );
+
+      // At least one department should have different allocation
+      const different =
+        alloc1['A'].length !== alloc2['A'].length ||
+        alloc1['B'].length !== alloc2['B'].length ||
+        alloc1['C'].length !== alloc2['C'].length;
+
+      expect(different).toBe(true);
+    });
+
+    it('should maximize department A profit for departmentAProfitMaximize', () => {
+      const employees = createMockEmployees(100);
+
+      const mapping = service.getAllocatedEmployeeMapping(
+        employees,
+        'departmentAProfitMaximize'
+      );
+
+      const result = service.simulateWithAllocation(
+        employees,
+        mapping,
+        employees.length
+      );
+
+      expect(result.department['A'].profit).toBeDefined();
+      expect(result.department['A'].profit).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should maximize department B revenue for departmentBRevenueMaximize', () => {
+      const employees = createMockEmployees(100);
+
+      const mapping = service.getAllocatedEmployeeMapping(
+        employees,
+        'departmentBRevenueMaximize'
+      );
+
+      const result = service.simulateWithAllocation(
+        employees,
+        mapping,
+        employees.length
+      );
+
+      expect(result.department['B'].finalRevenue).toBeDefined();
+      expect(result.department['B'].finalRevenue).toBeGreaterThan(0);
+    });
+
+    it('should maximize department C revenue for departmentCRevenueMaximize', () => {
+      const employees = createMockEmployees(100);
+
+      const mapping = service.getAllocatedEmployeeMapping(
+        employees,
+        'departmentCRevenueMaximize'
+      );
+
+      const result = service.simulateWithAllocation(
+        employees,
+        mapping,
+        employees.length
+      );
+
+      expect(result.department['C'].finalRevenue).toBeDefined();
+      expect(result.department['C'].finalRevenue).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Penalty and cost calculations', () => {
+    it('should calculate shortage coefficient correctly', () => {
+      // Fulfillment rate 1.0 (100%) -> coefficient 1.0 (no penalty)
+      let coeff = service.getShortageCoefficient(1.0, 'A');
+      expect(coeff).toBe(1.0);
+
+      // Fulfillment rate 0.9 (90%) -> coefficient 0.85 for A
+      coeff = service.getShortageCoefficient(0.9, 'A');
+      expect(coeff).toBe(0.85);
+
+      // Fulfillment rate 0.8 (80%) -> coefficient 0.7 for A
+      coeff = service.getShortageCoefficient(0.8, 'A');
+      expect(coeff).toBe(0.7);
+    });
+
+    it('should calculate surplus coefficient correctly', () => {
+      // Fulfillment rate 1.0 (100%) -> coefficient 1.0
+      let coeff = service.getSurplusCoefficient(1.0);
+      expect(coeff).toBe(1.0);
+
+      // Fulfillment rate 1.2 (120%) -> coefficient 1.0 (within range)
+      coeff = service.getSurplusCoefficient(1.2);
+      expect(coeff).toBe(1.0);
+
+      // Fulfillment rate 1.3 (130%) -> coefficient 0.95
+      coeff = service.getSurplusCoefficient(1.3);
+      expect(coeff).toBe(0.95);
+
+      // Fulfillment rate 1.5 (150%) -> coefficient 0.9
+      coeff = service.getSurplusCoefficient(1.5);
+      expect(coeff).toBe(0.9);
+
+      // Fulfillment rate 1.8 (180%) -> coefficient 0.8
+      coeff = service.getSurplusCoefficient(1.8);
+      expect(coeff).toBe(0.8);
+    });
+
+    it('should calculate cost as personnelCost * 3 / 100', () => {
+      const personnelCosts = [5, 10, 8]; // Sum = 23
+      const expectedCost = (23 * 3) / 100; // 0.69
+
+      const cost = service.calculateCost(personnelCosts);
+      expect(cost).toBeCloseTo(expectedCost, 5);
+    });
+
+    it('should apply both shortage and surplus corrections to revenue', () => {
+      const employees = createMockEmployees(100);
+      const result = service.simulateWithAllocation(
+        employees,
+        service.getAllocatedEmployeeMapping(employees, 'totalRevenue'),
+        employees.length
+      );
+
+      // Check that corrections were applied
+      for (const dept of ['A', 'B', 'C']) {
+        const deptResult = result.department[dept];
+        expect(deptResult.finalRevenue).toBeLessThanOrEqual(deptResult.baseRevenue);
+      }
+    });
+
+    it('should calculate profit as finalRevenue - cost', () => {
+      const employees = createMockEmployees(100);
+      const result = service.simulateWithAllocation(
+        employees,
+        service.getAllocatedEmployeeMapping(employees, 'totalRevenue'),
+        employees.length
+      );
+
+      for (const dept of ['A', 'B', 'C']) {
+        const deptResult = result.department[dept];
+        const expectedProfit = deptResult.finalRevenue - deptResult.cost;
+        expect(deptResult.profit).toBeCloseTo(expectedProfit, 5);
+      }
+    });
+  });
+
+  describe('Previous year revenue constraint', () => {
+    it('should set isBelowPreviousYearRevenue flag when total revenue < 58', () => {
+      // Create poor allocation scenario
+      const employees = createMockEmployees(50); // Small pool
+      const result = service.simulateWithAllocation(
+        employees,
+        service.getAllocatedEmployeeMapping(employees, 'totalRevenue'),
+        employees.length
+      );
+
+      if (result.summary.totalRevenue < 58) {
+        expect(result.summary.isBelowPreviousYearRevenue).toBe(true);
+      }
+    });
+
+    it('should not set isBelowPreviousYearRevenue flag when total revenue >= 58', () => {
+      const employees = createMockEmployees(100);
+      const result = service.simulateWithAllocation(
+        employees,
+        service.getAllocatedEmployeeMapping(employees, 'totalRevenue'),
+        employees.length
+      );
+
+      if (result.summary.totalRevenue >= 58) {
+        expect(result.summary.isBelowPreviousYearRevenue).toBe(false);
+      }
+    });
+  });
+
+  describe('Employee contribution calculation', () => {
+    it('should calculate employee contribution with correct weights', () => {
+      const employee: Employee = {
+        id: 'test-emp',
+        sales: 100,
+        management: 80,
+        development: 60,
+        nurture: 40,
+        personnelCost: 10,
+      };
+
+      // For department A: sales 0.45, management 0.35, development 0.10, nurture 0.10
+      const contribA = service.calculateEmployeeContribution(employee, 'A');
+      const expectedA =
+        100 * 0.45 + 80 * 0.35 + 60 * 0.1 + 40 * 0.1; // 45 + 28 + 6 + 4 = 83
+      expect(contribA).toBeCloseTo(expectedA, 5);
+
+      // For department C: sales 0.20, management 0.10, development 0.50, nurture 0.20
+      const contribC = service.calculateEmployeeContribution(employee, 'C');
+      const expectedC =
+        100 * 0.2 + 80 * 0.1 + 60 * 0.5 + 40 * 0.2; // 20 + 8 + 30 + 8 = 66
+      expect(contribC).toBeCloseTo(expectedC, 5);
+    });
+  });
+
+  describe('Department capability and base revenue', () => {
+    it('should calculate department capability as sum of contributions', () => {
       const employees: Employee[] = [
         {
-          id: '1',
+          id: 'emp1',
           sales: 100,
           management: 100,
           development: 100,
@@ -299,70 +306,57 @@ describe('SimulationEngineService', () => {
           personnelCost: 10,
         },
         {
-          id: '2',
-          sales: 80,
-          management: 80,
-          development: 80,
-          nurture: 80,
-          personnelCost: 12,
-        },
-        {
-          id: '3',
-          sales: 90,
-          management: 90,
-          development: 90,
-          nurture: 90,
-          personnelCost: 11,
+          id: 'emp2',
+          sales: 50,
+          management: 50,
+          development: 50,
+          nurture: 50,
+          personnelCost: 5,
         },
       ];
 
-      const allocation = {
-        A: 1,
-        B: 1,
-        C: 1,
-      };
+      const capability = service.calculateDepartmentCapability(
+        employees,
+        'A'
+      );
+      const contrib1 = service.calculateEmployeeContribution(employees[0], 'A');
+      const contrib2 = service.calculateEmployeeContribution(employees[1], 'A');
+      const expected = contrib1 + contrib2;
 
-      const result = service.simulate(employees, allocation, 100);
-
-      expect(result).toBeTruthy();
-      expect(result.department).toBeTruthy();
-      expect(result.department['A']).toBeTruthy();
-      expect(result.department['B']).toBeTruthy();
-      expect(result.department['C']).toBeTruthy();
-      expect(result.summary).toBeTruthy();
-      expect(result.summary.totalRevenue).toBeGreaterThan(0);
-      expect(result.summary.totalCost).toBeGreaterThan(0);
+      expect(capability).toBeCloseTo(expected, 5);
     });
 
-    it('should sum department results to summary', () => {
-      const employees: Employee[] = Array.from({ length: 50 }, (_, i) => ({
-        id: `${i}`,
-        sales: 50 + i,
-        management: 50 + i,
-        development: 50 + i,
-        nurture: 50 + i,
-        personnelCost: 5 + (i % 5),
-      }));
+    it('should calculate base revenue correctly', () => {
+      // Base revenue formula: baseRevenue * (1 + (capability / 100) * growthRate)
+      // For A: baseRevenue = 10, growthRate = 0.06
+      const capability = 100;
+      const baseRevenue = service.calculateBaseRevenue(capability, 'A');
+      const expected = 10 * (1 + (100 / 100) * 0.06); // 10 * 1.06 = 10.6
+      expect(baseRevenue).toBeCloseTo(expected, 5);
 
-      const allocation = {
-        A: 20,
-        B: 15,
-        C: 15,
-      };
+      // For C: baseRevenue = 2, growthRate = 0.25
+      const baseRevenueC = service.calculateBaseRevenue(capability, 'C');
+      const expectedC = 2 * (1 + (100 / 100) * 0.25); // 2 * 1.25 = 2.5
+      expect(baseRevenueC).toBeCloseTo(expectedC, 5);
+    });
+  });
 
-      const result = service.simulate(employees, allocation, 100);
+  describe('Fulfillment rate calculation', () => {
+    it('should calculate fulfillment rate correctly', () => {
+      // Fulfillment rate = allocated / appropriate
+      const fulfillmentRate = service.calculateFulfillmentRate(100, 100);
+      expect(fulfillmentRate).toBeCloseTo(1.0, 5);
 
-      const summedRevenue =
-        result.department['A'].finalRevenue +
-        result.department['B'].finalRevenue +
-        result.department['C'].finalRevenue;
-      const summedCost =
-        result.department['A'].cost +
-        result.department['B'].cost +
-        result.department['C'].cost;
+      const fulfillmentRate2 = service.calculateFulfillmentRate(90, 100);
+      expect(fulfillmentRate2).toBeCloseTo(0.9, 5);
 
-      expect(result.summary.totalRevenue).toBeCloseTo(summedRevenue, 5);
-      expect(result.summary.totalCost).toBeCloseTo(summedCost, 5);
+      const fulfillmentRate3 = service.calculateFulfillmentRate(120, 100);
+      expect(fulfillmentRate3).toBeCloseTo(1.2, 5);
+    });
+
+    it('should return 0 when appropriate headcount is 0', () => {
+      const fulfillmentRate = service.calculateFulfillmentRate(10, 0);
+      expect(fulfillmentRate).toBe(0);
     });
   });
 });

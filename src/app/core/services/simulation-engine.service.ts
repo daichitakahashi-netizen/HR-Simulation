@@ -223,6 +223,7 @@ export class SimulationEngineService {
         totalRevenue: 0,
         totalCost: 0,
         totalProfit: 0,
+        isBelowPreviousYearRevenue: false,
       },
     };
 
@@ -255,6 +256,7 @@ export class SimulationEngineService {
       totalRevenue,
       totalCost,
       totalProfit,
+      isBelowPreviousYearRevenue: totalRevenue < 58,
     };
 
     return result;
@@ -273,6 +275,7 @@ export class SimulationEngineService {
         totalRevenue: 0,
         totalCost: 0,
         totalProfit: 0,
+        isBelowPreviousYearRevenue: false,
       },
     };
 
@@ -307,6 +310,7 @@ export class SimulationEngineService {
       totalRevenue,
       totalCost,
       totalProfit,
+      isBelowPreviousYearRevenue: totalRevenue < 58,
     };
 
     return result;
@@ -325,12 +329,28 @@ export class SimulationEngineService {
       C: {},
     };
     const allocatedEmployeeIds = new Set<string>();
+    const minHeadcounts: Record<string, number> = {
+      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployeeCount / 100)),
+      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployeeCount / 100)),
+      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployeeCount / 100)),
+    };
 
-    // Step 0: Lock specified employees
+    // Step 0: Lock specified employees and validate minimum constraints
     for (const [empId, dept] of Object.entries(lockedEmployees)) {
       if (allocation[dept]) {
         allocation[dept][empId] = true;
         allocatedEmployeeIds.add(empId);
+      }
+    }
+
+    // Step 0.5: Validate locked employees don't violate minimum (allow overfulfillment)
+    for (const dept of ['A', 'B', 'C']) {
+      const lockedCount = Object.keys(allocation[dept]).length;
+      if (lockedCount > minHeadcounts[dept] * 2) {
+        // Guard against excessive locking (twice the minimum is reasonable)
+        console.warn(
+          `Warning: Department ${dept} has ${lockedCount} locked employees, exceeding 2x minimum (${minHeadcounts[dept] * 2})`
+        );
       }
     }
 
@@ -344,25 +364,25 @@ export class SimulationEngineService {
       contributionScores.set(dept, deptScores);
     });
 
-    // Step 2: Ensure minimum allocation
+    // Step 2: Ensure minimum allocation (including locked employees)
     for (const dept of ['A', 'B', 'C']) {
-      const scaledMinimum =
-        this.departmentConfigs[dept].minHeadcount *
-        (totalEmployeeCount / 100);
+      const scaledMinimum = minHeadcounts[dept];
       const deptScores = contributionScores.get(dept)!;
       const currentAllocated = Object.keys(allocation[dept]).length;
 
-      const sortedEmployees = employees
-        .filter((emp) => !allocatedEmployeeIds.has(emp.id))
-        .sort(
-          (a, b) =>
-            (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0)
-        );
+      if (currentAllocated < scaledMinimum) {
+        const sortedEmployees = employees
+          .filter((emp) => !allocatedEmployeeIds.has(emp.id))
+          .sort(
+            (a, b) =>
+              (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0)
+          );
 
-      for (let i = 0; i < scaledMinimum - currentAllocated && i < sortedEmployees.length; i++) {
-        const emp = sortedEmployees[i];
-        allocation[dept][emp.id] = true;
-        allocatedEmployeeIds.add(emp.id);
+        for (let i = 0; i < scaledMinimum - currentAllocated && i < sortedEmployees.length; i++) {
+          const emp = sortedEmployees[i];
+          allocation[dept][emp.id] = true;
+          allocatedEmployeeIds.add(emp.id);
+        }
       }
     }
 
@@ -431,6 +451,11 @@ export class SimulationEngineService {
     lockedEmployees: Record<string, string> = {}
   ): Record<string, number> {
     const totalEmployeeCount = employees.length;
+    const minHeadcounts: Record<string, number> = {
+      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployeeCount / 100)),
+      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployeeCount / 100)),
+      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployeeCount / 100)),
+    };
 
     // Step 0: Lock specified employees to their designated departments
     const allocation: Record<string, Record<string, boolean>> = {
@@ -447,6 +472,16 @@ export class SimulationEngineService {
       }
     }
 
+    // Step 0.5: Validate locked employees don't violate minimum (allow overfulfillment)
+    for (const dept of ['A', 'B', 'C']) {
+      const lockedCount = Object.keys(allocation[dept]).length;
+      if (lockedCount > minHeadcounts[dept] * 2) {
+        console.warn(
+          `Warning: Department ${dept} has ${lockedCount} locked employees, exceeding 2x minimum (${minHeadcounts[dept] * 2})`
+        );
+      }
+    }
+
     // Step 1: Calculate contribution scores for each employee to each department
     const contributionScores = new Map<string, Map<string, number>>();
     ['A', 'B', 'C'].forEach((dept) => {
@@ -457,25 +492,25 @@ export class SimulationEngineService {
       contributionScores.set(dept, deptScores);
     });
 
-    // Step 2: Ensure minimum allocation for each department
+    // Step 2: Ensure minimum allocation for each department (including locked employees)
     for (const dept of ['A', 'B', 'C']) {
-      const scaledMinimum =
-        this.departmentConfigs[dept].minHeadcount *
-        (totalEmployeeCount / 100);
+      const scaledMinimum = minHeadcounts[dept];
       const deptScores = contributionScores.get(dept)!;
       const currentAllocated = Object.keys(allocation[dept]).length;
 
-      const sortedEmployees = employees
-        .filter((emp) => !allocatedEmployeeIds.has(emp.id))
-        .sort(
-          (a, b) =>
-            (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0)
-        );
+      if (currentAllocated < scaledMinimum) {
+        const sortedEmployees = employees
+          .filter((emp) => !allocatedEmployeeIds.has(emp.id))
+          .sort(
+            (a, b) =>
+              (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0)
+          );
 
-      for (let i = 0; i < scaledMinimum - currentAllocated && i < sortedEmployees.length; i++) {
-        const emp = sortedEmployees[i];
-        allocation[dept][emp.id] = true;
-        allocatedEmployeeIds.add(emp.id);
+        for (let i = 0; i < scaledMinimum - currentAllocated && i < sortedEmployees.length; i++) {
+          const emp = sortedEmployees[i];
+          allocation[dept][emp.id] = true;
+          allocatedEmployeeIds.add(emp.id);
+        }
       }
     }
 

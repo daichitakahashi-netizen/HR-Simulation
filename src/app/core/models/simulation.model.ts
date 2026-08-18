@@ -84,6 +84,7 @@ export interface SimulationSummary {
   totalRevenue: number; // 全社売上
   totalCost: number; // 全社コスト
   totalProfit: number; // 全社利益
+  isBelowPreviousYearRevenue?: boolean; // 前年度売上（58億円）を下回っているかどうか
 }
 
 // Simulation parameters
