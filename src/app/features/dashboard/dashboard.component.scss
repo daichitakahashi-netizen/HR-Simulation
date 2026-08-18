@@ -9,6 +9,19 @@
   justify-content: center;
   background-color: rgba(255, 255, 255, 0.8);
   z-index: 1000;
+
+  .loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .loading-text {
+    font-size: 1rem;
+    color: #333;
+    font-weight: 500;
+  }
 }
 
 .dashboard-container {
@@ -59,12 +72,27 @@
     flex-shrink: 0;
   }
 
-  .toggle-group {
-    width: 100%;
+  .slide-toggle-wrapper {
     display: flex;
+    align-items: center;
+    gap: 0.5rem;
 
-    mat-button-toggle {
+    .toggle-label {
+      font-size: 0.85rem;
+      color: #666;
       flex: 1;
+
+      &:first-of-type {
+        text-align: right;
+      }
+
+      &:last-of-type {
+        text-align: left;
+      }
+    }
+
+    .toggle-switch {
+      flex-shrink: 0;
     }
   }
 
@@ -83,22 +111,22 @@
 .right-panel {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   overflow-y: auto;
 }
 
 .kpi-summary {
   h2 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.1rem;
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
     font-weight: 600;
   }
 
   .kpi-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 0.75rem;
-    margin-bottom: 1.5rem;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
   }
 
   .kpi-card {
@@ -107,21 +135,43 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 1rem;
+      padding: 0.6rem;
       text-align: center;
     }
 
     .kpi-label {
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       color: #666;
-      margin-bottom: 0.35rem;
+      margin-bottom: 0.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25rem;
+
+      .warning-badge {
+        background-color: #ff9800 !important;
+        color: white !important;
+        height: auto;
+        font-size: 0.6rem;
+        padding: 0.15rem 0.4rem;
+      }
     }
 
     .kpi-value {
-      font-size: 1.3rem;
+      font-size: 1.1rem;
       font-weight: 600;
       color: #1976d2;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.3rem;
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 0.2rem;
+
+      .kpi-unit {
+        font-size: 0.7rem;
+        color: #999;
+        font-weight: 400;
+      }
     }
 
     mat-chip-set {
@@ -141,14 +191,14 @@
   .charts-wrapper {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
 
-    @media (max-width: 1440px) {
+    @media (max-width: 900px) {
       grid-template-columns: repeat(2, 1fr);
     }
 
-    @media (max-width: 1024px) {
+    @media (max-width: 600px) {
       grid-template-columns: 1fr;
     }
   }
@@ -156,7 +206,7 @@
   .chart-card {
     background: #fff;
     border-radius: 4px;
-    padding: 1rem;
+    padding: 0.75rem;
     box-shadow: 0 2px 1px -1px rgba(0, 0, 0, 0.2), 0 1px 1px 0 rgba(0, 0, 0, 0.14), 0 1px 3px 0 rgba(0, 0, 0, 0.12);
     display: flex;
     flex-direction: column;
@@ -164,8 +214,8 @@
     min-width: 0;
 
     .chart-title {
-      margin: 0 0 0.75rem 0;
-      font-size: 0.95rem;
+      margin: 0 0 0.5rem 0;
+      font-size: 0.9rem;
       font-weight: 600;
       color: #333;
       text-align: center;
@@ -174,7 +224,7 @@
     .chart-container {
       flex: 1;
       position: relative;
-      min-height: 250px;
+      height: 200px;
 
       canvas {
         max-width: 100%;
@@ -187,46 +237,46 @@
 
 .department-status {
   h2 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.1rem;
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
     font-weight: 600;
   }
 
   .department-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
+    gap: 0.75rem;
   }
 
   .department-card {
     mat-card-header {
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.5rem;
     }
 
     mat-card-title {
-      font-size: 1rem;
+      font-size: 0.95rem;
       margin: 0;
     }
 
     mat-card-content {
       padding-top: 0;
-      padding: 0 1rem 1rem 1rem;
+      padding: 0 0.75rem 0.75rem 0.75rem;
     }
   }
 
   .dept-info {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    gap: 0.3rem;
+    margin-bottom: 0.5rem;
   }
 
   .info-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 0.8rem;
-    padding: 0.35rem 0;
+    font-size: 0.75rem;
+    padding: 0.2rem 0;
     border-bottom: 1px solid #f0f0f0;
 
     span {
@@ -240,21 +290,21 @@
   }
 
   .penalty-accordion {
-    margin-top: 0.5rem;
+    margin-top: 0.3rem;
   }
 
   .penalty-details {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    padding: 0.35rem 0;
+    gap: 0.25rem;
+    padding: 0.2rem 0;
   }
 
   .penalty-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
 
     span {
       color: #666;
@@ -267,7 +317,7 @@
   }
 
   .member-button-container {
-    margin-top: 0.75rem;
+    margin-top: 0.5rem;
     display: flex;
     justify-content: center;
   }

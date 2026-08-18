@@ -2,12 +2,13 @@ import { Component, OnInit, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatRadioModule } from '@angular/material/radio';
-import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatBadgeModule } from '@angular/material/badge';
 import { ChartConfiguration } from 'chart.js';
 import { BaseChartDirective } from 'ng2-charts';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
@@ -20,12 +21,13 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
     CommonModule,
     MatCardModule,
     MatRadioModule,
-    MatButtonToggleModule,
+    MatSlideToggleModule,
     MatExpansionModule,
     MatProgressSpinnerModule,
     MatChipsModule,
     MatButtonModule,
     MatDialogModule,
+    MatBadgeModule,
     BaseChartDirective,
   ],
   templateUrl: './dashboard.component.html',
@@ -56,6 +58,19 @@ export class DashboardComponent implements OnInit {
     { value: 'departmentCRevenueMaximize', label: 'C事業部売上最大化' },
   ];
 
+  // Department colors (A=blue, B=green, C=orange)
+  private readonly deptColors = {
+    A: '#1976D2',  // Blue
+    B: '#4CAF50',  // Green
+    C: '#FF9800',  // Orange
+  };
+
+  private readonly deptColorsLight = {
+    A: '#BBDEFB',  // Light blue
+    B: '#C8E6C9',  // Light green
+    C: '#FFE0B2',  // Light orange
+  };
+
   // Revenue chart configuration
   revenueChartData = computed(() => {
     const result = this.simulationResult();
@@ -76,7 +91,7 @@ export class DashboardComponent implements OnInit {
             result.department['B'].finalRevenue,
             result.department['C'].finalRevenue,
           ],
-          backgroundColor: ['#FF6B6B', '#4ECDC4', '#45B7D1'],
+          backgroundColor: [this.deptColors.A, this.deptColors.B, this.deptColors.C],
           borderColor: '#fff',
           borderWidth: 2,
         },
@@ -104,7 +119,7 @@ export class DashboardComponent implements OnInit {
             result.department['B'].cost,
             result.department['C'].cost,
           ],
-          backgroundColor: ['#FFB6B9', '#A8E6CF', '#FFD3B6'],
+          backgroundColor: [this.deptColorsLight.A, this.deptColorsLight.B, this.deptColorsLight.C],
           borderColor: '#fff',
           borderWidth: 2,
         },
@@ -132,12 +147,18 @@ export class DashboardComponent implements OnInit {
             result.department['B'].profit,
             result.department['C'].profit,
           ],
-          backgroundColor: ['#FFE5E5', '#D4F1E4', '#FFE5CC'],
+          backgroundColor: [this.deptColorsLight.A, this.deptColorsLight.B, this.deptColorsLight.C],
           borderColor: '#fff',
           borderWidth: 2,
         },
       ],
     };
+  });
+
+  // Check if revenue is below warning threshold (58億円)
+  readonly isBelowThreshold = computed(() => {
+    const result = this.simulationResult();
+    return result && result.summary.totalRevenue < 58;
   });
 
   donutChartOptions: ChartConfiguration<'doughnut'>['options'] = {

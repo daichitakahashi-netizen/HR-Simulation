@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, combineLatest, distinctUntilChanged, of } from 'rxjs';
+import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable } from 'rxjs';
 import { tap, switchMap } from 'rxjs/operators';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
@@ -19,11 +19,13 @@ export class SimulationStoreService {
   readonly employees$ = new BehaviorSubject<Employee[]>([]);
   readonly currentObjective$ = new BehaviorSubject<DepartmentObjective>('totalRevenue');
   readonly is110Mode$ = new BehaviorSubject<boolean>(false);
-  readonly simulationResult$ = new BehaviorSubject<AllocationResult | null>(null);
+  readonly simulationResult100$ = new BehaviorSubject<AllocationResult | null>(null);
+  readonly simulationResult110$ = new BehaviorSubject<AllocationResult | null>(null);
   readonly reasoningText$ = new BehaviorSubject<string>('');
 
   // Compatibility layer for signal-based components
   readonly simulationResult = signal<AllocationResult | null>(null);
+  readonly baselineResult = signal<AllocationResult | null>(null);
   readonly employees = signal<Employee[]>([]);
   readonly allocation = signal<AllocationMap>({});
   readonly selectedObjective = signal<string>('totalRevenue');
@@ -32,61 +34,226 @@ export class SimulationStoreService {
   readonly isLoading = signal<boolean>(false);
   readonly employeeCount = signal<number>(100);
   readonly allocatedEmployeeIds = signal<Record<string, string[]>>({ A: [], B: [], C: [] });
+  readonly is110Mode = signal<boolean>(false);
+
+  private simulationWorker: Worker | null = null;
 
   constructor(
     private httpClient: HttpClient,
     private simulationEngineService: SimulationEngineService,
     private csvParserService: CsvParserService
   ) {
+    this.initializeWorker();
     this.setupReactiveDataFlow();
+  }
+
+  private initializeWorker(): void {
+    if (typeof Worker !== 'undefined') {
+      try {
+        this.simulationWorker = new Worker(
+          new URL('../../workers/simulation.worker', import.meta.url),
+          { type: 'module' }
+        );
+      } catch (error) {
+        console.warn('Web Worker not available, falling back to main thread', error);
+      }
+    }
   }
 
   private setupReactiveDataFlow(): void {
     combineLatest([
       this.employees$,
       this.currentObjective$,
-      this.is110Mode$,
     ])
       .pipe(
         distinctUntilChanged((prev, curr) => {
           return JSON.stringify(prev) === JSON.stringify(curr);
         }),
         tap(() => this.isLoading.set(true)),
-        switchMap(([employees, objective, is110Mode]) => {
+        switchMap(([employees, objective]) => {
           this.employees.set(employees);
           this.selectedObjective.set(objective);
 
           if (employees.length === 0) {
+            this.isLoading.set(false);
             return of(null);
           }
 
-          const totalEmployees = is110Mode ? 110 : employees.length;
           const lockedEmployees = this.lockedEmployees();
-          const allocatedIds = this.simulationEngineService.getAllocatedEmployeeMapping(
-            employees,
-            objective,
-            lockedEmployees
-          );
-          const result = this.simulationEngineService.simulateWithAllocation(
-            employees,
-            allocatedIds,
-            totalEmployees
-          );
 
-          this.simulationResult$.next(result);
-          this.simulationResult.set(result);
-          this.allocation.set(result.allocation);
-          this.allocatedEmployeeIds.set(allocatedIds);
-
-          const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
-          this.reasoningText$.next(reasoningText);
-          this.reasonText.set(reasoningText);
-
-          return of(result);
+          return this.runDualSimulation(employees, objective, lockedEmployees);
         }),
-        tap(() => this.isLoading.set(false))
+        tap((results) => {
+          if (results) {
+            const { result100, result110 } = results;
+            this.simulationResult100$.next(result100);
+            this.simulationResult110$.next(result110);
+
+            // Set displayed result based on mode
+            const displayResult = this.is110Mode() ? result110 : result100;
+            this.simulationResult.set(displayResult);
+            this.baselineResult.set(result100);
+            this.allocation.set(displayResult.allocation);
+          }
+          this.isLoading.set(false);
+        })
       )
       .subscribe();
+
+    // Listen to is110Mode$ changes for switching display without recalculation
+    this.is110Mode$.pipe(
+      distinctUntilChanged(),
+      tap((is110Mode) => {
+        this.is110Mode.set(is110Mode);
+        const result100 = this.simulationResult100$.value;
+        const result110 = this.simulationResult110$.value;
+        const displayResult = is110Mode ? result110 : result100;
+        if (displayResult) {
+          this.simulationResult.set(displayResult);
+          this.allocation.set(displayResult.allocation);
+        }
+      })
+    ).subscribe();
+  }
+
+  private runDualSimulation(
+    employees: Employee[],
+    objective: DepartmentObjective,
+    lockedEmployees: Record<string, string>
+  ): Observable<{ result100: AllocationResult; result110: AllocationResult } | null> {
+    return new Observable((observer) => {
+      let result100: AllocationResult | null = null;
+      let result110: AllocationResult | null = null;
+      let completed100 = false;
+      let completed110 = false;
+
+      const checkCompletion = () => {
+        if (completed100 && completed110 && result100 && result110) {
+          observer.next({ result100, result110 });
+          observer.complete();
+        }
+      };
+
+      // Run 100-employee simulation first
+      this.runSimulationWithHybridEngine(
+        employees,
+        objective,
+        100,
+        lockedEmployees
+      ).subscribe({
+        next: (result) => {
+          if (result) {
+            result100 = result;
+          }
+          completed100 = true;
+          checkCompletion();
+        },
+        error: (error) => {
+          console.error('Error in 100-employee simulation:', error);
+          completed100 = true;
+          checkCompletion();
+        },
+      });
+
+      // Run 110-employee simulation
+      this.runSimulationWithHybridEngine(
+        employees,
+        objective,
+        110,
+        lockedEmployees
+      ).subscribe({
+        next: (result) => {
+          if (result) {
+            result110 = result;
+          }
+          completed110 = true;
+          checkCompletion();
+        },
+        error: (error) => {
+          console.error('Error in 110-employee simulation:', error);
+          completed110 = true;
+          checkCompletion();
+        },
+      });
+    });
+  }
+
+  private runSimulationWithHybridEngine(
+    employees: Employee[],
+    objective: DepartmentObjective,
+    totalEmployees: number,
+    lockedEmployees: Record<string, string>
+  ): Observable<AllocationResult | null> {
+    return new Observable((observer) => {
+      if (this.simulationWorker) {
+        const handleMessage = (event: MessageEvent) => {
+          try {
+            const result = event.data as AllocationResult;
+
+            const allocatedIds = {
+              A: Object.keys(result.department['A'].employeeContributions || []).filter(
+                (_, idx) => idx < result.allocation['A']
+              ),
+              B: Object.keys(result.department['B'].employeeContributions || []).filter(
+                (_, idx) => idx < result.allocation['B']
+              ),
+              C: Object.keys(result.department['C'].employeeContributions || []).filter(
+                (_, idx) => idx < result.allocation['C']
+              ),
+            };
+
+            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+            this.reasoningText$.next(reasoningText);
+            this.reasonText.set(reasoningText);
+            this.allocatedEmployeeIds.set(allocatedIds);
+
+            this.simulationWorker!.removeEventListener('message', handleMessage);
+            this.simulationWorker!.removeEventListener('error', handleError);
+            observer.next(result);
+            observer.complete();
+          } catch (error) {
+            handleError(error as ErrorEvent);
+          }
+        };
+
+        const handleError = (error: ErrorEvent | any) => {
+          console.error('Worker error:', error);
+          this.simulationWorker!.removeEventListener('message', handleMessage);
+          this.simulationWorker!.removeEventListener('error', handleError);
+          observer.next(null);
+          observer.complete();
+        };
+
+        this.simulationWorker.addEventListener('message', handleMessage);
+        this.simulationWorker.addEventListener('error', handleError);
+
+        this.simulationWorker.postMessage({
+          employees,
+          objective,
+          totalEmployees,
+        });
+      } else {
+        // Fallback to main thread calculation
+        const allocatedIds = this.simulationEngineService.getAllocatedEmployeeMapping(
+          employees,
+          objective,
+          lockedEmployees
+        );
+        const result = this.simulationEngineService.simulateWithAllocation(
+          employees,
+          allocatedIds,
+          totalEmployees
+        );
+
+        const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+        this.reasoningText$.next(reasoningText);
+        this.reasonText.set(reasoningText);
+        this.allocatedEmployeeIds.set(allocatedIds);
+
+        observer.next(result);
+        observer.complete();
+      }
+    });
   }
 
   private triggerRecalculation(): void {
@@ -96,41 +263,20 @@ export class SimulationStoreService {
 
   loadInitialData(count: number = 100): void {
     this.isLoading.set(true);
-    const csvFile = count === 110 ? '/assets/human_resources_110.csv' : '/assets/human_resources_100.csv';
 
-    this.httpClient.get(csvFile, {
+    this.httpClient.get('/assets/human_resources_100.csv', {
       responseType: 'text',
     }).subscribe({
       next: (csvText) => {
         let parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
 
-        if (count === 110 && parsedEmployees.length < 110) {
-          parsedEmployees = this.addMockEmployees(parsedEmployees, 110 - parsedEmployees.length);
-        }
-
+        // Always load 100-employee base data; later use runDualSimulation for both 100 and 110
         this.employees$.next(parsedEmployees);
-        this.is110Mode$.next(count === 110);
         this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Failed to load CSV:', error);
-        this.httpClient.get('/assets/human_resources_100.csv', {
-          responseType: 'text',
-        }).subscribe({
-          next: (csvText) => {
-            let parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
-            if (count === 110) {
-              parsedEmployees = this.addMockEmployees(parsedEmployees, 110 - parsedEmployees.length);
-            }
-            this.employees$.next(parsedEmployees);
-            this.is110Mode$.next(count === 110);
-            this.isLoading.set(false);
-          },
-          error: () => {
-            console.error('Failed to load fallback CSV');
-            this.isLoading.set(false);
-          },
-        });
+        this.isLoading.set(false);
       },
     });
   }
@@ -166,7 +312,6 @@ export class SimulationStoreService {
   setEmployeeCount(count: number): void {
     this.employeeCount.set(count);
     this.is110Mode$.next(count === 110);
-    this.loadInitialData(count);
   }
 
   getAverageAbilities() {
@@ -223,10 +368,12 @@ export class SimulationStoreService {
       employees: this.employees(),
       allocation: this.allocation(),
       simulationResult: this.simulationResult(),
+      baselineResult: this.baselineResult(),
       isLoading: this.isLoading(),
       reasonText: this.reasonText(),
       lockedEmployees: this.lockedEmployees(),
       allocatedEmployeeIds: this.allocatedEmployeeIds(),
+      is110Mode: this.is110Mode(),
     };
   }
 

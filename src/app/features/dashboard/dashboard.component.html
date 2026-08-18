@@ -1,7 +1,10 @@
 <!-- Loading Spinner -->
 @if (isLoading()) {
   <div class="loading-overlay">
-    <mat-spinner></mat-spinner>
+    <div class="loading-content">
+      <mat-spinner></mat-spinner>
+      <p class="loading-text">最適配置を計算中…</p>
+    </div>
   </div>
 }
 
@@ -23,11 +26,16 @@
 
     <!-- 110 Name Toggle -->
     <div class="toggle-section">
-      <h3 class="section-title">人数切り替え</h3>
-      <mat-button-toggle-group [value]="employeeCount()" (change)="onEmployeeCountChange($event.value)" class="toggle-group">
-        <mat-button-toggle [value]="100">100名（採用前）</mat-button-toggle>
-        <mat-button-toggle [value]="110">110名（採用後）</mat-button-toggle>
-      </mat-button-toggle-group>
+      <h3 class="section-title">100/110名比較</h3>
+      <div class="slide-toggle-wrapper">
+        <span class="toggle-label">100名（採用前）</span>
+        <mat-slide-toggle
+          [checked]="is110Mode()"
+          (change)="onEmployeeCountChange($event.checked ? 110 : 100)"
+          class="toggle-switch">
+        </mat-slide-toggle>
+        <span class="toggle-label">110名（採用後）</span>
+      </div>
     </div>
 
     <!-- Allocation Reason -->
@@ -51,13 +59,19 @@
       <div class="kpi-cards">
         <mat-card class="kpi-card">
           <mat-card-content>
-            <div class="kpi-label">全社売上</div>
+            <div class="kpi-label">
+              全社売上
+              @if (isBelowThreshold()) {
+                <mat-chip class="warning-badge">警告</mat-chip>
+              }
+            </div>
             <div class="kpi-value">
               @if (simulationResult()) {
                 {{ simulationResult()!.summary.totalRevenue | number: '1.1-1' }}
               } @else {
                 —
               }
+              <span class="kpi-unit">億円</span>
             </div>
             @if (is110Mode() && kpiDifferences()) {
               <mat-chip-set aria-label="差分表示">
@@ -82,6 +96,7 @@
               } @else {
                 —
               }
+              <span class="kpi-unit">億円</span>
             </div>
             @if (is110Mode() && kpiDifferences()) {
               <mat-chip-set aria-label="差分表示">
@@ -106,6 +121,7 @@
               } @else {
                 —
               }
+              <span class="kpi-unit">億円</span>
             </div>
             @if (is110Mode() && kpiDifferences()) {
               <mat-chip-set aria-label="差分表示">
