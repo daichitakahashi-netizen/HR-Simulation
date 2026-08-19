@@ -95,7 +95,6 @@ export class SimulationStoreService {
             this.simulationResult100$.next(result100);
             this.simulationResult110$.next(result110);
 
-            // Set displayed result based on mode
             const displayResult = this.is110Mode() ? result110 : result100;
             this.simulationResult.set(displayResult);
             this.baselineResult.set(result100);
@@ -138,20 +137,6 @@ export class SimulationStoreService {
 
       const checkCompletion = () => {
         if (completed100 && completed110 && result100 && result110) {
-          // Run verification for 100-employee allocation when objective is totalRevenue and no locks
-          if (employees.length === 100 && objective === 'totalRevenue' && Object.keys(lockedEmployees).length === 0) {
-            try {
-              const verificationResult = this.simulationEngineService.verifyOptimalAllocation(employees);
-              console.log('%c=== VERIFICATION REPORT ===', 'color: #2E7D32; font-weight: bold; font-size: 14px');
-              verificationResult.comparison.forEach(line => {
-                console.log(line);
-              });
-              console.log('%c=== END VERIFICATION ===', 'color: #2E7D32; font-weight: bold; font-size: 14px');
-            } catch (error) {
-              console.warn('Verification skipped:', error);
-            }
-          }
-
           observer.next({ result100, result110 });
           observer.complete();
         }
@@ -209,69 +194,54 @@ export class SimulationStoreService {
     lockedEmployees: Record<string, string>
   ): Observable<AllocationResult | null> {
     return new Observable((observer) => {
-      if (this.simulationWorker) {
-        const handleMessage = (event: MessageEvent) => {
-          try {
-            const result = event.data as AllocationResult;
+      if (!this.simulationWorker) {
+        console.error('Web Worker not available and no fallback calculation available');
+        observer.next(null);
+        observer.complete();
+        return;
+      }
 
-            const allocatedIds = {
-              A: result.department['A'].allocatedEmployeeIds || [],
-              B: result.department['B'].allocatedEmployeeIds || [],
-              C: result.department['C'].allocatedEmployeeIds || [],
-            };
+      const handleMessage = (event: MessageEvent) => {
+        try {
+          const result = event.data as AllocationResult;
 
-            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
-            this.reasoningText$.next(reasoningText);
-            this.reasonText.set(reasoningText);
-            this.allocatedEmployeeIds.set(allocatedIds);
+          const allocatedIds = {
+            A: result.department['A'].allocatedEmployeeIds || [],
+            B: result.department['B'].allocatedEmployeeIds || [],
+            C: result.department['C'].allocatedEmployeeIds || [],
+          };
 
-            this.simulationWorker!.removeEventListener('message', handleMessage);
-            this.simulationWorker!.removeEventListener('error', handleError);
-            observer.next(result);
-            observer.complete();
-          } catch (error) {
-            handleError(error as ErrorEvent);
-          }
-        };
+          const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+          this.reasoningText$.next(reasoningText);
+          this.reasonText.set(reasoningText);
+          this.allocatedEmployeeIds.set(allocatedIds);
 
-        const handleError = (error: ErrorEvent | any) => {
-          console.error('Worker error:', error);
           this.simulationWorker!.removeEventListener('message', handleMessage);
           this.simulationWorker!.removeEventListener('error', handleError);
-          observer.next(null);
+          observer.next(result);
           observer.complete();
-        };
+        } catch (error) {
+          handleError(error as ErrorEvent);
+        }
+      };
 
-        this.simulationWorker.addEventListener('message', handleMessage);
-        this.simulationWorker.addEventListener('error', handleError);
-
-        this.simulationWorker.postMessage({
-          employees,
-          objective,
-          totalEmployees,
-          lockedEmployees,
-        });
-      } else {
-        // Fallback to main thread calculation
-        const allocatedIds = this.simulationEngineService.getAllocatedEmployeeMapping(
-          employees,
-          objective,
-          lockedEmployees
-        );
-        const result = this.simulationEngineService.simulateWithAllocation(
-          employees,
-          allocatedIds,
-          totalEmployees
-        );
-
-        const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
-        this.reasoningText$.next(reasoningText);
-        this.reasonText.set(reasoningText);
-        this.allocatedEmployeeIds.set(allocatedIds);
-
-        observer.next(result);
+      const handleError = (error: ErrorEvent | any) => {
+        console.error('Worker error:', error);
+        this.simulationWorker!.removeEventListener('message', handleMessage);
+        this.simulationWorker!.removeEventListener('error', handleError);
+        observer.next(null);
         observer.complete();
-      }
+      };
+
+      this.simulationWorker.addEventListener('message', handleMessage);
+      this.simulationWorker.addEventListener('error', handleError);
+
+      this.simulationWorker.postMessage({
+        employees,
+        objective,
+        totalEmployees,
+        lockedEmployees,
+      });
     });
   }
 

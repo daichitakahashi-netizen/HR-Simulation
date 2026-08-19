@@ -141,69 +141,268 @@ class HybridSimulationEngine {
     return patterns;
   }
 
+  // Step 2: 多様な初期配置を生成（貪欲法を排除）
+  private generateDiverseInitialAllocations(
+    employees: Employee[],
+    pattern: AllocationPattern,
+    lockedEmployees?: Record<string, string>
+  ): Record<string, string[]>[] {
+    const initialAllocations: Record<string, string[]>[] = [];
+    const unlockedEmployees = employees.filter(
+      (emp) => !lockedEmployees || !lockedEmployees[emp.id]
+    );
+
+    // Strategy 1: Multiple random allocations (30 iterations)
+    for (let i = 0; i < 30; i++) {
+      const shuffled = [...unlockedEmployees].sort(() => Math.random() - 0.5);
+      const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+
+      // Place locked employees first
+      if (lockedEmployees) {
+        for (const [empId, dept] of Object.entries(lockedEmployees)) {
+          allocation[dept].push(empId);
+        }
+      }
+
+      // Allocate remaining in random order
+      let idx = 0;
+      for (const dept of ['A', 'B', 'C']) {
+        const needed = pattern[dept as keyof AllocationPattern] - allocation[dept].length;
+        for (let j = 0; j < needed && idx < shuffled.length; j++) {
+          allocation[dept].push(shuffled[idx].id);
+          idx++;
+        }
+      }
+      initialAllocations.push(allocation);
+    }
+
+    // Strategy 2: Stratified random allocations (10 iterations)
+    for (let i = 0; i < 10; i++) {
+      const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+
+      // Place locked employees
+      if (lockedEmployees) {
+        for (const [empId, dept] of Object.entries(lockedEmployees)) {
+          allocation[dept].push(empId);
+        }
+      }
+
+      const availableEmployees = new Set(unlockedEmployees.map((e) => e.id));
+      for (const dept of ['A', 'B', 'C']) {
+        const needed = pattern[dept as keyof AllocationPattern] - allocation[dept].length;
+        const candidates = Array.from(availableEmployees);
+
+        for (let j = 0; j < needed && candidates.length > 0; j++) {
+          const randomIndex = Math.floor(Math.random() * candidates.length);
+          const empId = candidates[randomIndex];
+          allocation[dept].push(empId);
+          availableEmployees.delete(empId);
+          candidates.splice(randomIndex, 1);
+        }
+      }
+      initialAllocations.push(allocation);
+    }
+
+    // Strategy 3: Round-robin allocation
+    {
+      const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+
+      if (lockedEmployees) {
+        for (const [empId, dept] of Object.entries(lockedEmployees)) {
+          allocation[dept].push(empId);
+        }
+      }
+
+      const depts = ['A', 'B', 'C'] as const;
+      let deptIdx = 0;
+
+      for (const emp of unlockedEmployees) {
+        let assigned = false;
+        for (let attempts = 0; attempts < 3; attempts++) {
+          const dept = depts[deptIdx];
+          if (
+            allocation[dept].length <
+            pattern[dept as keyof AllocationPattern]
+          ) {
+            allocation[dept].push(emp.id);
+            assigned = true;
+            deptIdx = (deptIdx + 1) % 3;
+            break;
+          }
+          deptIdx = (deptIdx + 1) % 3;
+        }
+        if (!assigned) {
+          for (const dept of depts) {
+            if (
+              allocation[dept].length <
+              pattern[dept as keyof AllocationPattern]
+            ) {
+              allocation[dept].push(emp.id);
+              break;
+            }
+          }
+        }
+      }
+      initialAllocations.push(allocation);
+    }
+
+    return initialAllocations;
+  }
+
+  // 局所探索：スワップベースで改善
+  private improveViaLocalSearch(
+    employees: Employee[],
+    allocation: Record<string, string[]>,
+    objective: DepartmentObjective,
+    pattern: AllocationPattern,
+    maxIterations: number = 200
+  ): Record<string, string[]> {
+    let currentAllocation = JSON.parse(JSON.stringify(allocation));
+    let currentResult = this.simulateAllocation(
+      employees,
+      currentAllocation,
+      employees.length
+    );
+    let currentScore = this.calculateObjectiveScore(currentResult, objective);
+
+    let improved = true;
+    let iterations = 0;
+    const tolerance = 1e-8;
+
+    while (improved && iterations < maxIterations) {
+      improved = false;
+      iterations++;
+
+      const depts = ['A', 'B', 'C'];
+
+      // Try swapping employees between departments
+      for (let i = 0; i < depts.length; i++) {
+        for (let j = i + 1; j < depts.length; j++) {
+          const dept1 = depts[i];
+          const dept2 = depts[j];
+
+          for (let k = 0; k < currentAllocation[dept1].length; k++) {
+            for (let l = 0; l < currentAllocation[dept2].length; l++) {
+              const testAllocation = JSON.parse(
+                JSON.stringify(currentAllocation)
+              );
+              const temp = testAllocation[dept1][k];
+              testAllocation[dept1][k] = testAllocation[dept2][l];
+              testAllocation[dept2][l] = temp;
+
+              const testResult = this.simulateAllocation(
+                employees,
+                testAllocation,
+                employees.length
+              );
+              const testScore = this.calculateObjectiveScore(
+                testResult,
+                objective
+              );
+
+              if (testScore > currentScore + tolerance) {
+                currentAllocation = testAllocation;
+                currentScore = testScore;
+                currentResult = testResult;
+                improved = true;
+                break;
+              }
+            }
+            if (improved) break;
+          }
+          if (improved) break;
+        }
+        if (improved) break;
+      }
+    }
+
+    return currentAllocation;
+  }
+
+  private calculateObjectiveScore(
+    result: AllocationResult,
+    objective: DepartmentObjective
+  ): number {
+    if (objective === 'totalRevenue') {
+      return result.summary.totalRevenue;
+    } else if (objective === 'departmentAProfitMaximize') {
+      return result.department['A'].profit;
+    } else if (objective === 'departmentBRevenueMaximize') {
+      return result.department['B'].finalRevenue;
+    } else if (objective === 'departmentCRevenueMaximize') {
+      return result.department['C'].finalRevenue;
+    }
+    return result.summary.totalRevenue;
+  }
+
   // Step 2: 各パターンに対して最適な割り当て（社員の最適配置）を実行
-  allocateEmployeesToPattern(
+  private optimizeAllocationForPattern(
     employees: Employee[],
     pattern: AllocationPattern,
     objective: DepartmentObjective,
-    totalEmployees: number,
     lockedEmployees?: Record<string, string>
-  ): Record<string, string[]> {
-    const allocation: Record<string, Record<string, boolean>> = {
-      A: {},
-      B: {},
-      C: {},
-    };
-    const allocatedEmployeeIds = new Set<string>();
-
-    // First, allocate locked employees
+  ): { allocation: Record<string, string[]>; score: number } {
+    // Validate locked employees against pattern
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
     if (lockedEmployees) {
-      for (const [empId, dept] of Object.entries(lockedEmployees)) {
-        allocation[dept][empId] = true;
-        allocatedEmployeeIds.add(empId);
+      for (const dept of Object.values(lockedEmployees)) {
+        if (lockedCounts[dept] !== undefined) {
+          lockedCounts[dept]++;
+        }
       }
     }
 
-    // Calculate contribution scores for each employee to each department
-    const contributionScores = new Map<string, Map<string, number>>();
-    ['A', 'B', 'C'].forEach((dept) => {
-      const deptScores = new Map<string, number>();
-      employees.forEach((emp) => {
-        deptScores.set(emp.id, this.calculateEmployeeContribution(emp, dept));
-      });
-      contributionScores.set(dept, deptScores);
-    });
-
-    // Allocate employees by score to each department
-    const departments = ['A', 'B', 'C'] as const;
-    const allocations = [pattern.A, pattern.B, pattern.C];
-
-    for (let deptIdx = 0; deptIdx < departments.length; deptIdx++) {
-      const dept = departments[deptIdx];
-      const requiredCount = allocations[deptIdx];
-      const allocatedCount = Object.keys(allocation[dept]).length;
-      const remaining = requiredCount - allocatedCount;
-
-      if (remaining <= 0) continue;
-
-      const deptScores = contributionScores.get(dept)!;
-
-      const sortedEmployees = employees
-        .filter((emp) => !allocatedEmployeeIds.has(emp.id))
-        .sort((a, b) => (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0));
-
-      for (let i = 0; i < remaining && i < sortedEmployees.length; i++) {
-        const emp = sortedEmployees[i];
-        allocation[dept][emp.id] = true;
-        allocatedEmployeeIds.add(emp.id);
+    // Check if locked allocation exceeds pattern
+    for (const dept of ['A', 'B', 'C']) {
+      if (lockedCounts[dept] > pattern[dept as keyof AllocationPattern]) {
+        return {
+          allocation: { A: [], B: [], C: [] },
+          score: -Infinity,
+        };
       }
     }
 
-    return {
-      A: Object.keys(allocation['A']),
-      B: Object.keys(allocation['B']),
-      C: Object.keys(allocation['C']),
-    };
+    const initialAllocations = this.generateDiverseInitialAllocations(
+      employees,
+      pattern,
+      lockedEmployees
+    );
+
+    let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
+    let bestScore = -Infinity;
+    let bestResult: AllocationResult | null = null;
+
+    for (const initAllocation of initialAllocations) {
+      const improvedAllocation = this.improveViaLocalSearch(
+        employees,
+        initAllocation,
+        objective,
+        pattern,
+        200
+      );
+
+      const result = this.simulateAllocation(employees, improvedAllocation, employees.length);
+      const score = this.calculateObjectiveScore(result, objective);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestAllocation = improvedAllocation;
+        bestResult = result;
+      } else if (
+        Math.abs(score - bestScore) < 1e-8 &&
+        bestResult !== null
+      ) {
+        const currentA = result.department['A'].finalRevenue;
+        const bestA = bestResult.department['A'].finalRevenue;
+        if (currentA > bestA) {
+          bestScore = score;
+          bestAllocation = improvedAllocation;
+          bestResult = result;
+        }
+      }
+    }
+
+    return { allocation: bestAllocation, score: bestScore };
   }
 
   // Step 3: シミュレーション実行
@@ -272,70 +471,54 @@ class HybridSimulationEngine {
     // Step 1: 制約のクリア - 有効な人数構成パターンをすべて生成
     const patterns = this.generateValidAllocationPatterns(totalEmployees);
 
-    let bestResult: AllocationResult | null = null;
+    let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
     let bestScore = -Infinity;
+    let bestResult: AllocationResult | null = null;
 
-    // Step 2 & 3: 各パターンに対して最適割り当てと制約チェックを実施
+    // Step 2 & 3: 各パターンに対して最適割り当てを実施
     for (const pattern of patterns) {
-      const allocatedIds = this.allocateEmployeesToPattern(
+      const { allocation, score } = this.optimizeAllocationForPattern(
         employees,
         pattern,
         objective,
-        totalEmployees,
         lockedEmployees
       );
 
-      const result = this.simulateAllocation(employees, allocatedIds, totalEmployees);
+      if (score === -Infinity) {
+        continue; // Skip invalid patterns
+      }
+
+      const result = this.simulateAllocation(employees, allocation, totalEmployees);
 
       // 制約チェック：全社売上が58億円を上回ること
-      if (result.summary.totalRevenue <= this.constraints.MIN_TOTAL_REVENUE) {
-        continue;
-      }
-
-      // 目的に応じたスコア計算
-      let score = 0;
-      if (objective === 'totalRevenue') {
-        score = result.summary.totalRevenue;
-      } else if (objective === 'departmentAProfitMaximize') {
-        score = result.department['A'].profit;
-      } else if (objective === 'departmentBRevenueMaximize') {
-        score = result.department['B'].finalRevenue;
-      } else if (objective === 'departmentCRevenueMaximize') {
-        score = result.department['C'].finalRevenue;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestResult = result;
+      if (result.summary.totalRevenue > this.constraints.MIN_TOTAL_REVENUE) {
+        if (score > bestScore) {
+          bestScore = score;
+          bestAllocation = allocation;
+          bestResult = result;
+        }
       }
     }
 
-    // フォールバック：制約を満たすパターンがない場合、最も制約に近いパターンを返す
+    // フォールバック：制約を満たすパターンがない場合、最高スコアパターンを返す
     if (!bestResult) {
+      bestScore = -Infinity;
       for (const pattern of patterns) {
-        const allocatedIds = this.allocateEmployeesToPattern(
+        const { allocation, score } = this.optimizeAllocationForPattern(
           employees,
           pattern,
           objective,
-          totalEmployees,
           lockedEmployees
         );
-        const result = this.simulateAllocation(employees, allocatedIds, totalEmployees);
-
-        let score = 0;
-        if (objective === 'totalRevenue') {
-          score = result.summary.totalRevenue;
-        } else if (objective === 'departmentAProfitMaximize') {
-          score = result.department['A'].profit;
-        } else if (objective === 'departmentBRevenueMaximize') {
-          score = result.department['B'].finalRevenue;
-        } else if (objective === 'departmentCRevenueMaximize') {
-          score = result.department['C'].finalRevenue;
-        }
 
         if (score > bestScore) {
           bestScore = score;
-          bestResult = result;
+          bestAllocation = allocation;
+          bestResult = this.simulateAllocation(
+            employees,
+            allocation,
+            totalEmployees
+          );
         }
       }
     }
