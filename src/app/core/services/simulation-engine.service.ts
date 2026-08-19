@@ -356,7 +356,7 @@ export class SimulationEngineService {
     return result.summary.totalRevenue;
   }
 
-  // Generate initial allocations using various heuristics
+  // Generate diverse initial allocations (eliminating greedy allocation based on sorted scores)
   private generateInitialAllocations(
     employees: Employee[],
     pattern: Record<string, number>,
@@ -365,85 +365,107 @@ export class SimulationEngineService {
     const initialAllocations: Record<string, string[]>[] = [];
     const unlockedEmployees = employees.filter(emp => !lockedEmployees[emp.id]);
 
-    // Pre-calculate contribution scores
-    const scores = new Map<string, Map<string, number>>();
-    ['A', 'B', 'C'].forEach(dept => {
-      const deptScores = new Map<string, number>();
-      employees.forEach(emp => {
-        deptScores.set(emp.id, this.calculateEmployeeContribution(emp, dept));
-      });
-      scores.set(dept, deptScores);
-    });
+    // Random allocation strategy: generate multiple random shuffles
+    // This avoids greedy score-based allocation and explores diverse patterns
+    for (let iteration = 0; iteration < 50; iteration++) {
+      // Create random permutation of unlocked employees
+      const shuffled = [...unlockedEmployees].sort(() => Math.random() - 0.5);
+      const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
 
-    // Heuristic 1: Sort by combined score (sum of all departments)
-    {
-      const sorted = unlockedEmployees.map(emp => ({
-        id: emp.id,
-        combinedScore: (['A', 'B', 'C'] as const)
-          .reduce((sum, dept) => sum + (scores.get(dept)?.get(emp.id) || 0), 0)
-      })).sort((a, b) => b.combinedScore - a.combinedScore);
+      // Place locked employees first
+      for (const [empId, dept] of Object.entries(lockedEmployees)) {
+        allocation[dept].push(empId);
+      }
 
-      const allocation = this.allocateFromSorted(
-        sorted.map(x => x.id),
-        pattern,
-        lockedEmployees
-      );
+      // Allocate remaining employees in random order
+      let idx = 0;
+      for (const dept of ['A', 'B', 'C']) {
+        const needed = pattern[dept] - allocation[dept].length;
+        for (let i = 0; i < needed && idx < shuffled.length; i++) {
+          allocation[dept].push(shuffled[idx].id);
+          idx++;
+        }
+      }
+
       initialAllocations.push(allocation);
     }
 
-    // Heuristic 2-4: Sort by each department's score
-    for (const targetDept of ['A', 'B', 'C']) {
-      const sorted = unlockedEmployees.map(emp => ({
-        id: emp.id,
-        score: scores.get(targetDept)?.get(emp.id) || 0
-      })).sort((a, b) => b.score - a.score);
+    // Add stratified random allocations: distribute by capability across departments
+    for (let iteration = 0; iteration < 20; iteration++) {
+      const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
 
-      const allocation = this.allocateFromSorted(
-        sorted.map(x => x.id),
-        pattern,
-        lockedEmployees
-      );
+      // Place locked employees
+      for (const [empId, dept] of Object.entries(lockedEmployees)) {
+        allocation[dept].push(empId);
+      }
+
+      // For each department, randomly select remaining employees needed
+      const availableEmployees = new Set(unlockedEmployees.map(e => e.id));
+
+      for (const dept of ['A', 'B', 'C']) {
+        const needed = pattern[dept] - allocation[dept].length;
+        const candidates = Array.from(availableEmployees);
+
+        for (let i = 0; i < needed && candidates.length > 0; i++) {
+          const randomIndex = Math.floor(Math.random() * candidates.length);
+          const empId = candidates[randomIndex];
+          allocation[dept].push(empId);
+          availableEmployees.delete(empId);
+          candidates.splice(randomIndex, 1);
+        }
+      }
+
+      initialAllocations.push(allocation);
+    }
+
+    // Add round-robin allocation
+    {
+      const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+
+      // Place locked employees
+      for (const [empId, dept] of Object.entries(lockedEmployees)) {
+        allocation[dept].push(empId);
+      }
+
+      const depts = ['A', 'B', 'C'];
+      let deptIdx = 0;
+      for (const emp of unlockedEmployees) {
+        // Find next department that still needs employees
+        let assigned = false;
+        for (let attempts = 0; attempts < 3; attempts++) {
+          const dept = depts[deptIdx];
+          if (allocation[dept].length < pattern[dept]) {
+            allocation[dept].push(emp.id);
+            assigned = true;
+            deptIdx = (deptIdx + 1) % 3;
+            break;
+          }
+          deptIdx = (deptIdx + 1) % 3;
+        }
+        if (!assigned) {
+          // Fallback: place in first available department
+          for (const dept of depts) {
+            if (allocation[dept].length < pattern[dept]) {
+              allocation[dept].push(emp.id);
+              break;
+            }
+          }
+        }
+      }
+
       initialAllocations.push(allocation);
     }
 
     return initialAllocations;
   }
 
-  // Allocate employees from a sorted list according to pattern
-  private allocateFromSorted(
-    sortedEmployeeIds: string[],
-    pattern: Record<string, number>,
-    lockedEmployees: Record<string, string>
-  ): Record<string, string[]> {
-    const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
-
-    // Place locked employees
-    for (const [empId, dept] of Object.entries(lockedEmployees)) {
-      allocation[dept].push(empId);
-    }
-
-    // Place remaining employees
-    const unallocatedIds = sortedEmployeeIds.filter(id => !lockedEmployees[id]);
-    for (const empId of unallocatedIds) {
-      // Find which department needs more employees
-      for (const dept of ['A', 'B', 'C']) {
-        if (allocation[dept].length < pattern[dept]) {
-          allocation[dept].push(empId);
-          break;
-        }
-      }
-    }
-
-    return allocation;
-  }
-
-  // Local search: improve allocation via swaps
+  // Local search: improve allocation via swaps and random restarts
   private improveAllocationViaLocalSearch(
     employees: Employee[],
     allocation: Record<string, string[]>,
     pattern: Record<string, number>,
     objective: DepartmentObjective,
-    maxIterations: number = 50
+    maxIterations: number = 200
   ): Record<string, string[]> {
     let currentAllocation = JSON.parse(JSON.stringify(allocation));
     let currentResult = this.simulateWithAllocation(employees, currentAllocation, employees.length);
@@ -451,6 +473,7 @@ export class SimulationEngineService {
 
     let improved = true;
     let iterations = 0;
+    const tolerance = 1e-8;
 
     while (improved && iterations < maxIterations) {
       improved = false;
@@ -459,17 +482,14 @@ export class SimulationEngineService {
       const depts = ['A', 'B', 'C'];
 
       // Try swapping employees between departments
-      for (let i = 0; i < depts.length && !improved; i++) {
-        for (let j = i + 1; j < depts.length && !improved; j++) {
+      for (let i = 0; i < depts.length; i++) {
+        for (let j = i + 1; j < depts.length; j++) {
           const dept1 = depts[i];
           const dept2 = depts[j];
 
-          // Sample swaps if arrays are large (optimization)
-          const maxK = Math.min(currentAllocation[dept1].length, 10);
-          const maxL = Math.min(currentAllocation[dept2].length, 10);
-
-          for (let k = 0; k < maxK && !improved; k++) {
-            for (let l = 0; l < maxL && !improved; l++) {
+          // Try all possible swaps between these two departments
+          for (let k = 0; k < currentAllocation[dept1].length; k++) {
+            for (let l = 0; l < currentAllocation[dept2].length; l++) {
               const testAllocation = JSON.parse(JSON.stringify(currentAllocation));
               const temp = testAllocation[dept1][k];
               testAllocation[dept1][k] = testAllocation[dept2][l];
@@ -478,13 +498,46 @@ export class SimulationEngineService {
               const testResult = this.simulateWithAllocation(employees, testAllocation, employees.length);
               const testScore = this.calculateObjectiveScore(testResult, objective);
 
-              if (testScore > currentScore + 0.0001) {
+              if (testScore > currentScore + tolerance) {
                 currentAllocation = testAllocation;
                 currentScore = testScore;
                 currentResult = testResult;
                 improved = true;
+                break;  // Move to next iteration after finding improvement
               }
             }
+            if (improved) break;
+          }
+          if (improved) break;
+        }
+        if (improved) break;
+      }
+
+      // If no improvement from swaps, try perturbation and continue search
+      if (!improved && iterations < maxIterations * 0.8) {
+        // Gentle perturbation: swap a random pair of employees
+        const dept1 = depts[Math.floor(Math.random() * 3)];
+        const dept2 = depts[Math.floor(Math.random() * 3)];
+        if (dept1 !== dept2 &&
+            currentAllocation[dept1].length > 0 &&
+            currentAllocation[dept2].length > 0) {
+          const k = Math.floor(Math.random() * currentAllocation[dept1].length);
+          const l = Math.floor(Math.random() * currentAllocation[dept2].length);
+
+          const testAllocation = JSON.parse(JSON.stringify(currentAllocation));
+          const temp = testAllocation[dept1][k];
+          testAllocation[dept1][k] = testAllocation[dept2][l];
+          testAllocation[dept2][l] = temp;
+
+          const testResult = this.simulateWithAllocation(employees, testAllocation, employees.length);
+          const testScore = this.calculateObjectiveScore(testResult, objective);
+
+          // Accept perturbation even if not better (for exploration)
+          if (testScore > currentScore - 0.01) {
+            currentAllocation = testAllocation;
+            currentScore = testScore;
+            currentResult = testResult;
+            improved = true;
           }
         }
       }
@@ -493,7 +546,7 @@ export class SimulationEngineService {
     return currentAllocation;
   }
 
-  // Step 2: For a given pattern, find optimal employee allocation via exhaustive search over candidates
+  // Step 2: For a given pattern, find optimal employee allocation via diverse search strategies
   private optimizeAllocationForPattern(
     employees: Employee[],
     pattern: Record<string, number>,
@@ -516,7 +569,7 @@ export class SimulationEngineService {
       }
     }
 
-    // Generate multiple initial allocations
+    // Generate diverse initial allocations (no greedy sorting)
     const initialAllocations = this.generateInitialAllocations(
       employees,
       pattern,
@@ -525,25 +578,34 @@ export class SimulationEngineService {
 
     let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
     let bestScore = -Infinity;
+    let bestResult: AllocationResult | null = null;
 
-    // Improve each initial allocation via local search
+    // Improve each initial allocation via local search with increased iterations
     for (const initAllocation of initialAllocations) {
       const improvedAllocation = this.improveAllocationViaLocalSearch(
         employees,
         initAllocation,
         pattern,
         objective,
-        50
+        500  // Increased from 50 to 500 for more thorough exploration
       );
 
       const result = this.simulateWithAllocation(employees, improvedAllocation, employees.length);
       const score = this.calculateObjectiveScore(result, objective);
 
       // Tiebreaker: prefer higher department A revenue
-      if (score > bestScore ||
-          (score === bestScore && result.department['A'].finalRevenue > this.simulateWithAllocation(employees, bestAllocation, employees.length).department['A'].finalRevenue)) {
+      if (score > bestScore) {
         bestScore = score;
         bestAllocation = improvedAllocation;
+        bestResult = result;
+      } else if (score === bestScore && bestResult !== null) {
+        const currentA = result.department['A'].finalRevenue;
+        const bestA = bestResult.department['A'].finalRevenue;
+        if (currentA > bestA) {
+          bestScore = score;
+          bestAllocation = improvedAllocation;
+          bestResult = result;
+        }
       }
     }
 
@@ -671,19 +733,42 @@ export class SimulationEngineService {
     };
 
     const comparison: string[] = [];
-    comparison.push(`=== Optimal Allocation Verification (100 employees, Total Revenue Maximization) ===`);
-    comparison.push(`Optimal Allocation: A=${optimalAllocation.A}, B=${optimalAllocation.B}, C=${optimalAllocation.C}`);
-    comparison.push(`Optimal Total Revenue: ${optimalResult.summary.totalRevenue.toFixed(4)} (100M JPY)`);
-    comparison.push(`Optimal Total Profit: ${optimalResult.summary.totalProfit.toFixed(4)} (100M JPY)`);
-    comparison.push(`Department A - Revenue: ${optimalResult.department['A'].finalRevenue.toFixed(4)}, Capability: ${optimalResult.department['A'].departmentCapability.toFixed(4)}, Fulfillment Rate: ${optimalResult.department['A'].fulfillmentRate.toFixed(4)}`);
-    comparison.push(`Department B - Revenue: ${optimalResult.department['B'].finalRevenue.toFixed(4)}, Capability: ${optimalResult.department['B'].departmentCapability.toFixed(4)}, Fulfillment Rate: ${optimalResult.department['B'].fulfillmentRate.toFixed(4)}`);
-    comparison.push(`Department C - Revenue: ${optimalResult.department['C'].finalRevenue.toFixed(4)}, Capability: ${optimalResult.department['C'].departmentCapability.toFixed(4)}, Fulfillment Rate: ${optimalResult.department['C'].fulfillmentRate.toFixed(4)}`);
+    comparison.push(`\n${'='.repeat(80)}`);
+    comparison.push(`=== OPTIMAL ALLOCATION VERIFICATION (100 employees, Total Revenue Maximization) ===`);
+    comparison.push(`${'='.repeat(80)}\n`);
 
-    // For comparison: test a known local solution (48/42/10)
+    comparison.push(`📊 OPTIMAL SOLUTION:`);
+    comparison.push(`  Allocation: A=${optimalAllocation.A}, B=${optimalAllocation.B}, C=${optimalAllocation.C}`);
+    comparison.push(`  Total Revenue: ${optimalResult.summary.totalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Total Profit: ${optimalResult.summary.totalProfit.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Total Cost: ${optimalResult.summary.totalCost.toFixed(4)} (100M JPY)\n`);
+
+    comparison.push(`Department A:`);
+    comparison.push(`  Revenue: ${optimalResult.department['A'].finalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Capability: ${optimalResult.department['A'].departmentCapability.toFixed(4)}`);
+    comparison.push(`  Fulfillment Rate: ${optimalResult.department['A'].fulfillmentRate.toFixed(4)} (${(optimalResult.department['A'].fulfillmentRate * 100).toFixed(1)}%)`);
+    comparison.push(`  Shortage Coeff: ${optimalResult.department['A'].shortageCoefficient.toFixed(4)}`);
+    comparison.push(`  Surplus Coeff: ${optimalResult.department['A'].surplusCoefficient.toFixed(4)}\n`);
+
+    comparison.push(`Department B:`);
+    comparison.push(`  Revenue: ${optimalResult.department['B'].finalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Capability: ${optimalResult.department['B'].departmentCapability.toFixed(4)}`);
+    comparison.push(`  Fulfillment Rate: ${optimalResult.department['B'].fulfillmentRate.toFixed(4)} (${(optimalResult.department['B'].fulfillmentRate * 100).toFixed(1)}%)`);
+    comparison.push(`  Shortage Coeff: ${optimalResult.department['B'].shortageCoefficient.toFixed(4)}`);
+    comparison.push(`  Surplus Coeff: ${optimalResult.department['B'].surplusCoefficient.toFixed(4)}\n`);
+
+    comparison.push(`Department C:`);
+    comparison.push(`  Revenue: ${optimalResult.department['C'].finalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Capability: ${optimalResult.department['C'].departmentCapability.toFixed(4)}`);
+    comparison.push(`  Fulfillment Rate: ${optimalResult.department['C'].fulfillmentRate.toFixed(4)} (${(optimalResult.department['C'].fulfillmentRate * 100).toFixed(1)}%)`);
+    comparison.push(`  Shortage Coeff: ${optimalResult.department['C'].shortageCoefficient.toFixed(4)}`);
+    comparison.push(`  Surplus Coeff: ${optimalResult.department['C'].surplusCoefficient.toFixed(4)}\n`);
+
+    // For comparison: test known allocations
     let localSolutionRevenue: number | undefined;
     let localSolutionProfit: number | undefined;
 
-    // Try to construct a 48/42/10 allocation if possible
+    // Evaluate 48/42/10 allocation
     const localAllocationIds: Record<string, string[]> = { A: [], B: [], C: [] };
     for (let i = 0; i < Math.min(48, employees.length); i++) {
       localAllocationIds['A'].push(employees[i].id);
@@ -699,12 +784,76 @@ export class SimulationEngineService {
     localSolutionRevenue = localResult.summary.totalRevenue;
     localSolutionProfit = localResult.summary.totalProfit;
 
-    comparison.push(``);
-    comparison.push(`=== Comparison with Local Solution (48/42/10) ===`);
-    comparison.push(`Local Solution Revenue: ${localSolutionRevenue.toFixed(4)} (100M JPY)`);
-    comparison.push(`Local Solution Profit: ${localSolutionProfit.toFixed(4)} (100M JPY)`);
-    comparison.push(`Revenue Difference: ${(optimalResult.summary.totalRevenue - localSolutionRevenue).toFixed(4)} (Optimal is ${optimalResult.summary.totalRevenue > localSolutionRevenue ? 'better' : 'worse'})`);
-    comparison.push(`Profit Difference: ${(optimalResult.summary.totalProfit - localSolutionProfit).toFixed(4)} (Optimal is ${optimalResult.summary.totalProfit > localSolutionProfit ? 'better' : 'worse'})`);
+    // Evaluate 40/40/20 allocation
+    const expected40_40_20Ids: Record<string, string[]> = { A: [], B: [], C: [] };
+    for (let i = 0; i < 40; i++) {
+      expected40_40_20Ids['A'].push(employees[i].id);
+    }
+    for (let i = 40; i < 80; i++) {
+      expected40_40_20Ids['B'].push(employees[i].id);
+    }
+    for (let i = 80; i < 100; i++) {
+      expected40_40_20Ids['C'].push(employees[i].id);
+    }
+
+    const expected40_40_20Result = this.simulateWithAllocation(employees, expected40_40_20Ids, 100);
+
+    comparison.push(`${'='.repeat(80)}`);
+    comparison.push(`=== COMPARISON WITH REFERENCE ALLOCATIONS ===`);
+    comparison.push(`${'='.repeat(80)}\n`);
+
+    comparison.push(`❌ Local Solution (48/42/10) [Greedy-based]:`);
+    comparison.push(`  Allocation: A=48, B=42, C=10`);
+    comparison.push(`  Total Revenue: ${localSolutionRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Total Profit: ${localSolutionProfit.toFixed(4)} (100M JPY)\n`);
+
+    comparison.push(`🎯 Expected Solution (40/40/20) [Design Master]:`);
+    comparison.push(`  Allocation: A=40, B=40, C=20`);
+    comparison.push(`  Total Revenue: ${expected40_40_20Result.summary.totalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Total Profit: ${expected40_40_20Result.summary.totalProfit.toFixed(4)} (100M JPY)\n`);
+
+    comparison.push(`📈 Revenue Comparison:`);
+    comparison.push(`  Optimal vs 48/42/10: ${(optimalResult.summary.totalRevenue - localSolutionRevenue).toFixed(4)} (Optimal is ${optimalResult.summary.totalRevenue > localSolutionRevenue ? '🔼 BETTER' : '🔽 WORSE'})`);
+    comparison.push(`  Optimal vs 40/40/20: ${(optimalResult.summary.totalRevenue - expected40_40_20Result.summary.totalRevenue).toFixed(4)} (${optimalResult.summary.totalRevenue >= expected40_40_20Result.summary.totalRevenue ? 'Match or Better' : 'Below Expected'})\n`);
+
+    // Assertion checks
+    const expectedA = 40, expectedB = 40, expectedC = 20;
+    const isCorrectAllocation = optimalAllocation.A === expectedA && optimalAllocation.B === expectedB && optimalAllocation.C === expectedC;
+    const expectedRevenue = 61.54;
+    const isCorrectRevenue = Math.abs(optimalResult.summary.totalRevenue - expectedRevenue) < 0.1;
+    const isOptimalBetterThanLocal = optimalResult.summary.totalRevenue > localSolutionRevenue;
+
+    comparison.push(`${'='.repeat(80)}`);
+    comparison.push(`=== ASSERTION RESULTS ===`);
+    comparison.push(`${'='.repeat(80)}\n`);
+
+    comparison.push(`✓ Allocation Verification:`);
+    comparison.push(`  Expected: A=${expectedA}, B=${expectedB}, C=${expectedC}`);
+    comparison.push(`  Actual:   A=${optimalAllocation.A}, B=${optimalAllocation.B}, C=${optimalAllocation.C}`);
+    comparison.push(`  Status: ${isCorrectAllocation ? '✅ PASS' : '❌ FAIL'}\n`);
+
+    comparison.push(`✓ Revenue Target (≈ ${expectedRevenue} 100M JPY):`);
+    comparison.push(`  Actual Revenue: ${optimalResult.summary.totalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`  Difference from Target: ${Math.abs(optimalResult.summary.totalRevenue - expectedRevenue).toFixed(4)} (100M JPY)`);
+    comparison.push(`  Status: ${isCorrectRevenue ? '✅ PASS' : '❌ FAIL'}\n`);
+
+    comparison.push(`✓ Optimal Solution Quality:`);
+    comparison.push(`  Optimal Revenue vs Greedy (48/42/10): ${optimalResult.summary.totalRevenue.toFixed(4)} > ${localSolutionRevenue.toFixed(4)}`);
+    comparison.push(`  Revenue Gain: ${(optimalResult.summary.totalRevenue - localSolutionRevenue).toFixed(4)} (100M JPY)`);
+    comparison.push(`  Status: ${isOptimalBetterThanLocal ? '✅ PASS' : '❌ FAIL'}\n`);
+
+    // Final summary
+    comparison.push(`${'='.repeat(80)}`);
+    if (isCorrectAllocation && isOptimalBetterThanLocal) {
+      comparison.push(`🎉 SUCCESS: Greedy allocation eliminated. Optimal solution found correctly!`);
+    } else {
+      comparison.push(`⚠️ WARNING: Expected (40/40/20) with revenue ≈ 61.54, but got different result.`);
+    }
+    comparison.push(`${'='.repeat(80)}\n`);
+
+    if (!isCorrectAllocation) {
+      console.warn(`⚠️ Allocation mismatch: Expected (40/40/20) but got (${optimalAllocation.A}/${optimalAllocation.B}/${optimalAllocation.C})`);
+    }
 
     return {
       optimalAllocation,

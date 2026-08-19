@@ -1,7 +1,8 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable } from 'rxjs';
 import { tap, switchMap } from 'rxjs/operators';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
 import {
@@ -37,6 +38,7 @@ export class SimulationStoreService {
   readonly is110Mode = signal<boolean>(false);
 
   private simulationWorker: Worker | null = null;
+  private snackBar = inject(MatSnackBar);
 
   constructor(
     private httpClient: HttpClient,
@@ -136,6 +138,20 @@ export class SimulationStoreService {
 
       const checkCompletion = () => {
         if (completed100 && completed110 && result100 && result110) {
+          // Run verification for 100-employee allocation when objective is totalRevenue and no locks
+          if (employees.length === 100 && objective === 'totalRevenue' && Object.keys(lockedEmployees).length === 0) {
+            try {
+              const verificationResult = this.simulationEngineService.verifyOptimalAllocation(employees);
+              console.log('%c=== VERIFICATION REPORT ===', 'color: #2E7D32; font-weight: bold; font-size: 14px');
+              verificationResult.comparison.forEach(line => {
+                console.log(line);
+              });
+              console.log('%c=== END VERIFICATION ===', 'color: #2E7D32; font-weight: bold; font-size: 14px');
+            } catch (error) {
+              console.warn('Verification skipped:', error);
+            }
+          }
+
           observer.next({ result100, result110 });
           observer.complete();
         }
@@ -364,8 +380,10 @@ export class SimulationStoreService {
     }
 
     // Validate lock constraint before applying
-    if (!this.validateLockConstraint(locked)) {
-      console.warn('Lock operation violates constraints and was cancelled');
+    const error = this.validateLockConstraint(locked);
+    if (error) {
+      this.snackBar.open(error, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
+      console.warn('Lock operation violates constraints:', error);
       return;
     }
 
@@ -374,11 +392,13 @@ export class SimulationStoreService {
     // Trigger recalculation with locked employees via employees$ trigger
     const employees = this.employees$.value;
     this.employees$.next([...employees]);
+
+    this.snackBar.open('ロック設定を更新しました', '✓', { duration: 3000 });
   }
 
-  private validateLockConstraint(lockedEmployees: Record<string, string>): boolean {
+  private validateLockConstraint(lockedEmployees: Record<string, string>): string | null {
     const totalEmployees = this.employees().length;
-    if (totalEmployees === 0) return true;
+    if (totalEmployees === 0) return null;
 
     const minHeadcounts: Record<string, number> = {
       A: Math.ceil(30 * (totalEmployees / 100)),
@@ -400,12 +420,12 @@ export class SimulationStoreService {
         .reduce((sum, d) => sum + minHeadcounts[d], 0);
 
       if (lockedCounts[dept] > totalEmployees - otherMinsSum) {
-        console.warn(`Lock constraint violation: Department ${dept} would exceed capacity`);
-        return false;
+        const maxAllowed = totalEmployees - otherMinsSum;
+        return `事業部${dept}にはこれ以上ロック設定できません（最大${maxAllowed}名まで、現在${lockedCounts[dept]}名）`;
       }
     }
 
-    return true;
+    return null;
   }
 
   getState() {
@@ -431,6 +451,8 @@ export class SimulationStoreService {
     const deptA = result.department['A'];
     const deptB = result.department['B'];
     const deptC = result.department['C'];
+    const is110Mode = employees.length === 110;
+    const baselineResult = this.simulationResult100$.value;
 
     // Map objective to human-readable text
     let objectiveText = '';
@@ -450,9 +472,9 @@ export class SimulationStoreService {
 
     // Find department with highest final revenue growth
     const departments = [
-      { code: 'A', name: 'A事業部', finalRevenue: deptA.finalRevenue, baseRevenue: deptA.baseRevenue },
-      { code: 'B', name: 'B事業部', finalRevenue: deptB.finalRevenue, baseRevenue: deptB.baseRevenue },
-      { code: 'C', name: 'C事業部', finalRevenue: deptC.finalRevenue, baseRevenue: deptC.baseRevenue },
+      { code: 'A', name: 'A事業部', finalRevenue: deptA.finalRevenue, baseRevenue: deptA.baseRevenue, allocatedEmp: deptA.allocatedEmployees },
+      { code: 'B', name: 'B事業部', finalRevenue: deptB.finalRevenue, baseRevenue: deptB.baseRevenue, allocatedEmp: deptB.allocatedEmployees },
+      { code: 'C', name: 'C事業部', finalRevenue: deptC.finalRevenue, baseRevenue: deptC.baseRevenue, allocatedEmp: deptC.allocatedEmployees },
     ];
 
     // Calculate growth from base for each department
@@ -508,19 +530,34 @@ export class SimulationStoreService {
     }
 
     // Build reasoning text
-    const totalRevenue = result.summary.totalRevenue.toFixed(1);
-    const totalCost = result.summary.totalCost.toFixed(1);
+    const totalRevenue = result.summary.totalRevenue.toFixed(2);
+    const totalCost = result.summary.totalCost.toFixed(2);
+    const totalProfit = result.summary.totalProfit.toFixed(2);
 
     let reasoning = `【${objectiveText}】を実現するため、${dominantDept.name}を中心に配置しました。`;
     reasoning += `${dominantDept.name}には${skillNameMap[dominantSkill[0]]}に優れた人材を集約し、最大の売上向上効果を実現しています。`;
 
-    if (avoidedPenalties.length > 0) {
-      reasoning += `${avoidedPenalties.join('および')}を回避し、`;
-    } else {
-      reasoning += `各事業部の最低要員確保を成功させ、`;
-    }
+    if (is110Mode) {
+      if (baselineResult) {
+        const revenueDiff = (result.summary.totalRevenue - baselineResult.summary.totalRevenue).toFixed(2);
+        const profitDiff = (result.summary.totalProfit - baselineResult.summary.totalProfit).toFixed(2);
+        const revenueDiffDisp = parseFloat(revenueDiff) >= 0 ? `+${revenueDiff}` : revenueDiff;
+        const profitDiffDisp = parseFloat(profitDiff) >= 0 ? `+${profitDiff}` : profitDiff;
 
-    reasoning += `全社コスト${totalCost}億円で売上${totalRevenue}億円を達成しました。`;
+        reasoning += `追加採用の10名を${dominantDept.name}など成長性の高い部門に重点配置することで、`;
+        reasoning += `売上${totalRevenue}億円（Δ${revenueDiffDisp}億円）、利益${totalProfit}億円（Δ${profitDiffDisp}億円）の向上を実現しました。`;
+      } else {
+        reasoning += `追加採用の10名を${dominantDept.name}など成長性の高い部門に重点配置することで、`;
+        reasoning += `売上${totalRevenue}億円、利益${totalProfit}億円を達成しました。`;
+      }
+    } else {
+      if (avoidedPenalties.length > 0) {
+        reasoning += `${avoidedPenalties.join('および')}を回避し、`;
+      } else {
+        reasoning += `各事業部の最低要員確保を成功させ、`;
+      }
+      reasoning += `全社コスト${totalCost}億円で売上${totalRevenue}億円を達成しました。`;
+    }
 
     return reasoning;
   }
