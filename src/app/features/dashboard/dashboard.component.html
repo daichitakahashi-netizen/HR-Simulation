@@ -15,13 +15,16 @@
     <!-- Purpose Selection -->
     <div class="objective-section">
       <h3 class="section-title">目的選択</h3>
-      <mat-radio-group [value]="selectedObjective()" (change)="onObjectiveChange($event.value)" class="radio-group">
-        @for (obj of objectives; track obj.value) {
-          <mat-radio-button [value]="obj.value" class="radio-button">
-            {{ obj.label }}
-          </mat-radio-button>
-        }
-      </mat-radio-group>
+      <mat-form-field appearance="outline" class="objective-field">
+        <mat-label>目的</mat-label>
+        <mat-select [value]="selectedObjective()" (selectionChange)="onObjectiveChange($event.value)">
+          @for (obj of objectives; track obj.value) {
+            <mat-option [value]="obj.value">
+              {{ obj.label }}
+            </mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
     </div>
 
     <!-- 110 Name Toggle -->
@@ -39,16 +42,16 @@
     </div>
 
     <!-- Allocation Reason -->
-    <mat-expansion-panel class="reason-panel">
-      <mat-expansion-panel-header>
-        <mat-panel-title>
-          配置理由
-        </mat-panel-title>
-      </mat-expansion-panel-header>
-      <p class="reason-content">
-        {{ reasonText() }}
-      </p>
-    </mat-expansion-panel>
+    <mat-card class="reason-panel print-section">
+      <mat-card-header>
+        <mat-card-title>配置方針およびその理由</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <p class="reason-content">
+          {{ reasonText() }}
+        </p>
+      </mat-card-content>
+    </mat-card>
   </div>
 
   <!-- Right Column: Result & Summary Panel -->
@@ -184,7 +187,7 @@
       <div class="department-cards">
         @for (dept of departments; track dept.id) {
           @let deptResult = getDepartmentResult(simulationResult(), dept.id);
-          <mat-card class="department-card">
+          <mat-card [class]="'department-card dept-' + dept.id.toLowerCase()">
             <mat-card-header>
               <mat-card-title>{{ dept.label }}</mat-card-title>
             </mat-card-header>

@@ -1,7 +1,8 @@
 import { Component, OnInit, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
-import { MatRadioModule } from '@angular/material/radio';
+import { MatSelectModule } from '@angular/material/select';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -20,7 +21,8 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
   imports: [
     CommonModule,
     MatCardModule,
-    MatRadioModule,
+    MatSelectModule,
+    MatFormFieldModule,
     MatSlideToggleModule,
     MatExpansionModule,
     MatProgressSpinnerModule,

@@ -78,6 +78,7 @@ export interface DepartmentResult {
   cost: number; // コスト (人件費 × 3)
   profit: number; // 利益
   personnelCosts: number[]; // 配置された社員の人件費 array
+  allocatedEmployeeIds: string[]; // 配置された社員ID
 }
 
 export interface SimulationSummary {

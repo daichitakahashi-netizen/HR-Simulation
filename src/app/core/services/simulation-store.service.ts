@@ -362,11 +362,50 @@ export class SimulationStoreService {
     } else {
       locked[employeeId] = department;
     }
+
+    // Validate lock constraint before applying
+    if (!this.validateLockConstraint(locked)) {
+      console.warn('Lock operation violates constraints and was cancelled');
+      return;
+    }
+
     this.lockedEmployees.set(locked);
 
     // Trigger recalculation with locked employees via employees$ trigger
     const employees = this.employees$.value;
     this.employees$.next([...employees]);
+  }
+
+  private validateLockConstraint(lockedEmployees: Record<string, string>): boolean {
+    const totalEmployees = this.employees().length;
+    if (totalEmployees === 0) return true;
+
+    const minHeadcounts: Record<string, number> = {
+      A: Math.ceil(30 * (totalEmployees / 100)),
+      B: Math.ceil(20 * (totalEmployees / 100)),
+      C: Math.ceil(10 * (totalEmployees / 100)),
+    };
+
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
+    for (const dept of Object.values(lockedEmployees)) {
+      if (lockedCounts[dept] !== undefined) {
+        lockedCounts[dept]++;
+      }
+    }
+
+    // Check if locked counts exceed maximum allowed (total - other minimums)
+    for (const dept of ['A', 'B', 'C']) {
+      const otherMinsSum = Object.keys(minHeadcounts)
+        .filter(d => d !== dept)
+        .reduce((sum, d) => sum + minHeadcounts[d], 0);
+
+      if (lockedCounts[dept] > totalEmployees - otherMinsSum) {
+        console.warn(`Lock constraint violation: Department ${dept} would exceed capacity`);
+        return false;
+      }
+    }
+
+    return true;
   }
 
   getState() {

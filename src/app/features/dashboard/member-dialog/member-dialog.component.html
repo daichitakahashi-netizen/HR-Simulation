@@ -1,0 +1,105 @@
+<div class="dialog-container">
+  <div class="dialog-header">
+    <h2 mat-dialog-title>{{ data.departmentLabel }} - 配置メンバー</h2>
+  </div>
+
+  <mat-dialog-content>
+    <div class="content-section">
+      <!-- Filter Input -->
+      <mat-form-field appearance="outline" class="filter-field">
+        <mat-label>社員IDまたは能力値で検索</mat-label>
+        <input
+          matInput
+          placeholder="検索キーワード"
+          [value]="filterText()"
+          (input)="onFilterChange($event.target.value)">
+      </mat-form-field>
+
+      <!-- Loading State -->
+      @if (isLoading()) {
+        <div class="loading-state">
+          <mat-spinner diameter="40"></mat-spinner>
+          <p>計算中...</p>
+        </div>
+      } @else {
+        <!-- Member Table -->
+        <div class="table-container">
+          <table mat-table [dataSource]="filteredAndSortedMembers()" matSort (matSortChange)="onSortChange($event)" class="member-table">
+            <!-- ID Column -->
+            <ng-container matColumnDef="id">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>社員ID</th>
+              <td mat-cell *matCellDef="let element">{{ element.id }}</td>
+            </ng-container>
+
+            <!-- Sales Column -->
+            <ng-container matColumnDef="sales">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>営業力</th>
+              <td mat-cell *matCellDef="let element">{{ element.sales }}</td>
+            </ng-container>
+
+            <!-- Management Column -->
+            <ng-container matColumnDef="management">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>管理力</th>
+              <td mat-cell *matCellDef="let element">{{ element.management }}</td>
+            </ng-container>
+
+            <!-- Development Column -->
+            <ng-container matColumnDef="development">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>開拓力</th>
+              <td mat-cell *matCellDef="let element">{{ element.development }}</td>
+            </ng-container>
+
+            <!-- Nurture Column -->
+            <ng-container matColumnDef="nurture">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>育成力</th>
+              <td mat-cell *matCellDef="let element">{{ element.nurture }}</td>
+            </ng-container>
+
+            <!-- Personnel Cost Column -->
+            <ng-container matColumnDef="personnelCost">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>人件費</th>
+              <td mat-cell *matCellDef="let element">{{ element.personnelCost }}</td>
+            </ng-container>
+
+            <!-- Lock Toggle Column -->
+            <ng-container matColumnDef="lock">
+              <th mat-header-cell *matHeaderCellDef>固定</th>
+              <td mat-cell *matCellDef="let element" [class.locked-row]="isLocked(element.id)">
+                <mat-slide-toggle
+                  [checked]="isLocked(element.id)"
+                  (change)="toggleLock(element.id)"
+                  color="primary">
+                </mat-slide-toggle>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr
+              mat-row
+              *matRowDef="let row; columns: displayedColumns;"
+              [class.locked-row]="isLocked(row.id)">
+            </tr>
+          </table>
+
+          <!-- No Results Message -->
+          @if (filteredAndSortedMembers().length === 0) {
+            <div class="no-results">
+              該当するメンバーはありません
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-button (click)="dialogRef.close()">キャンセル</button>
+    <button
+      mat-raised-button
+      color="primary"
+      (click)="onRecalculate()"
+      [disabled]="isLoading()">
+      再計算して反映
+    </button>
+  </mat-dialog-actions>
+</div>

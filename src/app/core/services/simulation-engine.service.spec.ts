@@ -359,4 +359,87 @@ describe('SimulationEngineService', () => {
       expect(fulfillmentRate).toBe(0);
     });
   });
+
+  describe('Optimal allocation verification (Phase 1 test)', () => {
+    it('should verify optimal allocation for 100 employees without locks', () => {
+      const employees = createMockEmployees(100);
+
+      const result = service.verifyOptimalAllocation(employees);
+
+      expect(result.optimalAllocation).toBeDefined();
+      expect(result.optimalAllocation['A']).toBeGreaterThanOrEqual(30);
+      expect(result.optimalAllocation['B']).toBeGreaterThanOrEqual(20);
+      expect(result.optimalAllocation['C']).toBeGreaterThanOrEqual(10);
+      expect(result.optimalRevenue).toBeGreaterThan(0);
+      expect(result.comparison.length).toBeGreaterThan(0);
+    });
+
+    it('should show comparison between optimal and local solution (48/42/10)', () => {
+      const employees = createMockEmployees(100);
+
+      const result = service.verifyOptimalAllocation(employees);
+
+      expect(result.localSolutionRevenue).toBeDefined();
+      expect(result.localSolutionProfit).toBeDefined();
+
+      // Optimal should be better than or equal to local solution
+      if (result.optimalRevenue !== result.localSolutionRevenue) {
+        expect(result.optimalRevenue).toBeGreaterThanOrEqual(result.localSolutionRevenue! - 0.0001);
+      }
+    });
+
+    it('should evaluate specific allocation patterns correctly', () => {
+      const employees = createMockEmployees(100);
+
+      // Test 40/40/20 pattern
+      const result40 = service.evaluateAllocationPattern(
+        employees,
+        { A: 40, B: 40, C: 20 },
+        'totalRevenue'
+      );
+
+      expect(result40.allocation['A']).toBe(40);
+      expect(result40.allocation['B']).toBe(40);
+      expect(result40.allocation['C']).toBe(20);
+      expect(result40.totalRevenue).toBeGreaterThan(0);
+
+      // Test 48/42/10 pattern
+      const result48 = service.evaluateAllocationPattern(
+        employees,
+        { A: 48, B: 42, C: 10 },
+        'totalRevenue'
+      );
+
+      expect(result48.allocation['A']).toBe(48);
+      expect(result48.allocation['B']).toBe(42);
+      expect(result48.allocation['C']).toBe(10);
+      expect(result48.totalRevenue).toBeGreaterThan(0);
+    });
+
+    it('should throw error for non-100 employee count', () => {
+      const employees = createMockEmployees(50);
+
+      expect(() => {
+        service.verifyOptimalAllocation(employees);
+      }).toThrowError('Verification test requires exactly 100 employees');
+    });
+
+    it('should respect lock constraints and reject invalid locks', () => {
+      const employees = createMockEmployees(100);
+
+      // Create an impossible lock situation (too many locks for one department)
+      const lockedEmployees: Record<string, string> = {};
+      for (let i = 0; i < 95; i++) {
+        lockedEmployees[employees[i].id] = 'A';
+      }
+
+      expect(() => {
+        service.calculateOptimalAllocation(
+          employees,
+          'totalRevenue',
+          lockedEmployees
+        );
+      }).toThrowError();
+    });
+  });
 });

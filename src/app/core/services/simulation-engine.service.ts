@@ -203,6 +203,7 @@ export class SimulationEngineService {
       cost,
       profit,
       personnelCosts,
+      allocatedEmployeeIds: employees.map((emp) => emp.id),
     };
   }
 
@@ -316,290 +317,461 @@ export class SimulationEngineService {
     return result;
   }
 
+  // Step 1: Generate all valid allocation patterns
+  private generateAllocationPatterns(totalEmployees: number): Record<string, number>[] {
+    const minHeadcounts: Record<string, number> = {
+      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployees / 100)),
+      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployees / 100)),
+      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployees / 100)),
+    };
+
+    const patterns: Record<string, number>[] = [];
+
+    for (let a = minHeadcounts['A']; a <= totalEmployees - minHeadcounts['B'] - minHeadcounts['C']; a++) {
+      for (let b = minHeadcounts['B']; b <= totalEmployees - a - minHeadcounts['C']; b++) {
+        const c = totalEmployees - a - b;
+        if (c >= minHeadcounts['C']) {
+          patterns.push({ A: a, B: b, C: c });
+        }
+      }
+    }
+
+    return patterns;
+  }
+
+  // Calculate objective score for a given result
+  private calculateObjectiveScore(
+    result: AllocationResult,
+    objective: DepartmentObjective
+  ): number {
+    if (objective === 'totalRevenue') {
+      return result.summary.totalRevenue;
+    } else if (objective === 'departmentAProfitMaximize') {
+      return result.department['A'].profit;
+    } else if (objective === 'departmentBRevenueMaximize') {
+      return result.department['B'].finalRevenue;
+    } else if (objective === 'departmentCRevenueMaximize') {
+      return result.department['C'].finalRevenue;
+    }
+    return result.summary.totalRevenue;
+  }
+
+  // Generate initial allocations using various heuristics
+  private generateInitialAllocations(
+    employees: Employee[],
+    pattern: Record<string, number>,
+    lockedEmployees: Record<string, string>
+  ): Record<string, string[]>[] {
+    const initialAllocations: Record<string, string[]>[] = [];
+    const unlockedEmployees = employees.filter(emp => !lockedEmployees[emp.id]);
+
+    // Pre-calculate contribution scores
+    const scores = new Map<string, Map<string, number>>();
+    ['A', 'B', 'C'].forEach(dept => {
+      const deptScores = new Map<string, number>();
+      employees.forEach(emp => {
+        deptScores.set(emp.id, this.calculateEmployeeContribution(emp, dept));
+      });
+      scores.set(dept, deptScores);
+    });
+
+    // Heuristic 1: Sort by combined score (sum of all departments)
+    {
+      const sorted = unlockedEmployees.map(emp => ({
+        id: emp.id,
+        combinedScore: (['A', 'B', 'C'] as const)
+          .reduce((sum, dept) => sum + (scores.get(dept)?.get(emp.id) || 0), 0)
+      })).sort((a, b) => b.combinedScore - a.combinedScore);
+
+      const allocation = this.allocateFromSorted(
+        sorted.map(x => x.id),
+        pattern,
+        lockedEmployees
+      );
+      initialAllocations.push(allocation);
+    }
+
+    // Heuristic 2-4: Sort by each department's score
+    for (const targetDept of ['A', 'B', 'C']) {
+      const sorted = unlockedEmployees.map(emp => ({
+        id: emp.id,
+        score: scores.get(targetDept)?.get(emp.id) || 0
+      })).sort((a, b) => b.score - a.score);
+
+      const allocation = this.allocateFromSorted(
+        sorted.map(x => x.id),
+        pattern,
+        lockedEmployees
+      );
+      initialAllocations.push(allocation);
+    }
+
+    return initialAllocations;
+  }
+
+  // Allocate employees from a sorted list according to pattern
+  private allocateFromSorted(
+    sortedEmployeeIds: string[],
+    pattern: Record<string, number>,
+    lockedEmployees: Record<string, string>
+  ): Record<string, string[]> {
+    const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+
+    // Place locked employees
+    for (const [empId, dept] of Object.entries(lockedEmployees)) {
+      allocation[dept].push(empId);
+    }
+
+    // Place remaining employees
+    const unallocatedIds = sortedEmployeeIds.filter(id => !lockedEmployees[id]);
+    for (const empId of unallocatedIds) {
+      // Find which department needs more employees
+      for (const dept of ['A', 'B', 'C']) {
+        if (allocation[dept].length < pattern[dept]) {
+          allocation[dept].push(empId);
+          break;
+        }
+      }
+    }
+
+    return allocation;
+  }
+
+  // Local search: improve allocation via swaps
+  private improveAllocationViaLocalSearch(
+    employees: Employee[],
+    allocation: Record<string, string[]>,
+    pattern: Record<string, number>,
+    objective: DepartmentObjective,
+    maxIterations: number = 50
+  ): Record<string, string[]> {
+    let currentAllocation = JSON.parse(JSON.stringify(allocation));
+    let currentResult = this.simulateWithAllocation(employees, currentAllocation, employees.length);
+    let currentScore = this.calculateObjectiveScore(currentResult, objective);
+
+    let improved = true;
+    let iterations = 0;
+
+    while (improved && iterations < maxIterations) {
+      improved = false;
+      iterations++;
+
+      const depts = ['A', 'B', 'C'];
+
+      // Try swapping employees between departments
+      for (let i = 0; i < depts.length && !improved; i++) {
+        for (let j = i + 1; j < depts.length && !improved; j++) {
+          const dept1 = depts[i];
+          const dept2 = depts[j];
+
+          // Sample swaps if arrays are large (optimization)
+          const maxK = Math.min(currentAllocation[dept1].length, 10);
+          const maxL = Math.min(currentAllocation[dept2].length, 10);
+
+          for (let k = 0; k < maxK && !improved; k++) {
+            for (let l = 0; l < maxL && !improved; l++) {
+              const testAllocation = JSON.parse(JSON.stringify(currentAllocation));
+              const temp = testAllocation[dept1][k];
+              testAllocation[dept1][k] = testAllocation[dept2][l];
+              testAllocation[dept2][l] = temp;
+
+              const testResult = this.simulateWithAllocation(employees, testAllocation, employees.length);
+              const testScore = this.calculateObjectiveScore(testResult, objective);
+
+              if (testScore > currentScore + 0.0001) {
+                currentAllocation = testAllocation;
+                currentScore = testScore;
+                currentResult = testResult;
+                improved = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return currentAllocation;
+  }
+
+  // Step 2: For a given pattern, find optimal employee allocation via exhaustive search over candidates
+  private optimizeAllocationForPattern(
+    employees: Employee[],
+    pattern: Record<string, number>,
+    objective: DepartmentObjective,
+    lockedEmployees: Record<string, string> = {}
+  ): { allocation: Record<string, string[]>, score: number } {
+    // Validate locked employees against pattern
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
+    for (const dept of Object.values(lockedEmployees)) {
+      if (lockedCounts[dept] !== undefined) {
+        lockedCounts[dept]++;
+      }
+    }
+
+    // Check if locked allocation exceeds pattern
+    for (const dept of ['A', 'B', 'C']) {
+      if (lockedCounts[dept] > pattern[dept]) {
+        // Return worst score to signal failure
+        return { allocation: { A: [], B: [], C: [] }, score: -Infinity };
+      }
+    }
+
+    // Generate multiple initial allocations
+    const initialAllocations = this.generateInitialAllocations(
+      employees,
+      pattern,
+      lockedEmployees
+    );
+
+    let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
+    let bestScore = -Infinity;
+
+    // Improve each initial allocation via local search
+    for (const initAllocation of initialAllocations) {
+      const improvedAllocation = this.improveAllocationViaLocalSearch(
+        employees,
+        initAllocation,
+        pattern,
+        objective,
+        50
+      );
+
+      const result = this.simulateWithAllocation(employees, improvedAllocation, employees.length);
+      const score = this.calculateObjectiveScore(result, objective);
+
+      // Tiebreaker: prefer higher department A revenue
+      if (score > bestScore ||
+          (score === bestScore && result.department['A'].finalRevenue > this.simulateWithAllocation(employees, bestAllocation, employees.length).department['A'].finalRevenue)) {
+        bestScore = score;
+        bestAllocation = improvedAllocation;
+      }
+    }
+
+    return { allocation: bestAllocation, score: bestScore };
+  }
+
+  // Validate locked employees against minimum headcount constraints
+  private validateLockedEmployees(
+    employees: Employee[],
+    lockedEmployees: Record<string, string>
+  ): { valid: boolean; error?: string } {
+    const totalEmployees = employees.length;
+    const minHeadcounts: Record<string, number> = {
+      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployees / 100)),
+      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployees / 100)),
+      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployees / 100)),
+    };
+
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
+    for (const dept of Object.values(lockedEmployees)) {
+      if (lockedCounts[dept] !== undefined) {
+        lockedCounts[dept]++;
+      }
+    }
+
+    // Check if locked counts exceed minimum headcount
+    for (const dept of ['A', 'B', 'C']) {
+      if (lockedCounts[dept] > totalEmployees - minHeadcounts['A'] - minHeadcounts['B'] - minHeadcounts['C'] + minHeadcounts[dept]) {
+        return {
+          valid: false,
+          error: `Locked employees for department ${dept} (${lockedCounts[dept]}) exceed maximum allowed`
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  // Internal method: exhaustive search across all valid patterns
+  private findOptimalAllocationInternal(
+    employees: Employee[],
+    objective: DepartmentObjective,
+    lockedEmployees: Record<string, string> = {}
+  ): Record<string, string[]> {
+    // Validate locked employees first
+    const validation = this.validateLockedEmployees(employees, lockedEmployees);
+    if (!validation.valid) {
+      throw new Error(`Lock constraint violation: ${validation.error}`);
+    }
+
+    const totalEmployeeCount = employees.length;
+    const patterns = this.generateAllocationPatterns(totalEmployeeCount);
+
+    let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
+    let bestScore = -Infinity;
+    let bestPatternIndex = 0;
+
+    for (let idx = 0; idx < patterns.length; idx++) {
+      const pattern = patterns[idx];
+      const { allocation, score } = this.optimizeAllocationForPattern(
+        employees,
+        pattern,
+        objective,
+        lockedEmployees
+      );
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestAllocation = allocation;
+        bestPatternIndex = idx;
+      }
+    }
+
+    return bestAllocation;
+  }
+
   // Get allocated employees mapping
   getAllocatedEmployeeMapping(
     employees: Employee[],
     objective: DepartmentObjective,
     lockedEmployees: Record<string, string> = {}
   ): Record<string, string[]> {
-    const totalEmployeeCount = employees.length;
-    const allocation: Record<string, Record<string, boolean>> = {
-      A: {},
-      B: {},
-      C: {},
-    };
-    const allocatedEmployeeIds = new Set<string>();
-    const minHeadcounts: Record<string, number> = {
-      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployeeCount / 100)),
-      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployeeCount / 100)),
-      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployeeCount / 100)),
-    };
-
-    // Step 0: Lock specified employees and validate minimum constraints
-    for (const [empId, dept] of Object.entries(lockedEmployees)) {
-      if (allocation[dept]) {
-        allocation[dept][empId] = true;
-        allocatedEmployeeIds.add(empId);
-      }
-    }
-
-    // Step 0.5: Validate locked employees don't violate minimum (allow overfulfillment)
-    for (const dept of ['A', 'B', 'C']) {
-      const lockedCount = Object.keys(allocation[dept]).length;
-      if (lockedCount > minHeadcounts[dept] * 2) {
-        // Guard against excessive locking (twice the minimum is reasonable)
-        console.warn(
-          `Warning: Department ${dept} has ${lockedCount} locked employees, exceeding 2x minimum (${minHeadcounts[dept] * 2})`
-        );
-      }
-    }
-
-    // Step 1: Calculate contribution scores
-    const contributionScores = new Map<string, Map<string, number>>();
-    ['A', 'B', 'C'].forEach((dept) => {
-      const deptScores = new Map<string, number>();
-      employees.forEach((emp) => {
-        deptScores.set(emp.id, this.calculateEmployeeContribution(emp, dept));
-      });
-      contributionScores.set(dept, deptScores);
-    });
-
-    // Step 2: Ensure minimum allocation (including locked employees)
-    for (const dept of ['A', 'B', 'C']) {
-      const scaledMinimum = minHeadcounts[dept];
-      const deptScores = contributionScores.get(dept)!;
-      const currentAllocated = Object.keys(allocation[dept]).length;
-
-      if (currentAllocated < scaledMinimum) {
-        const sortedEmployees = employees
-          .filter((emp) => !allocatedEmployeeIds.has(emp.id))
-          .sort(
-            (a, b) =>
-              (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0)
-          );
-
-        for (let i = 0; i < scaledMinimum - currentAllocated && i < sortedEmployees.length; i++) {
-          const emp = sortedEmployees[i];
-          allocation[dept][emp.id] = true;
-          allocatedEmployeeIds.add(emp.id);
-        }
-      }
-    }
-
-    // Step 3: Allocate remaining employees
-    const remainingEmployees = employees.filter(
-      (emp) => !allocatedEmployeeIds.has(emp.id)
-    );
-
-    for (const emp of remainingEmployees) {
-      let bestDept = 'A';
-      let bestScore = -Infinity;
-
-      for (const dept of ['A', 'B', 'C']) {
-        const testAllocation: Record<string, Record<string, boolean>> = {
-          A: { ...allocation['A'] },
-          B: { ...allocation['B'] },
-          C: { ...allocation['C'] },
-        };
-        testAllocation[dept][emp.id] = true;
-
-        const allocationCount: Record<string, number> = {
-          A: Object.keys(testAllocation['A']).length,
-          B: Object.keys(testAllocation['B']).length,
-          C: Object.keys(testAllocation['C']).length,
-        };
-
-        const deptEmployeesA = employees.filter((e) => testAllocation['A'][e.id]);
-        const deptEmployeesB = employees.filter((e) => testAllocation['B'][e.id]);
-        const deptEmployeesC = employees.filter((e) => testAllocation['C'][e.id]);
-
-        const resultA = this.calculateDepartmentResult(deptEmployeesA, allocationCount['A'], 'A', totalEmployeeCount);
-        const resultB = this.calculateDepartmentResult(deptEmployeesB, allocationCount['B'], 'B', totalEmployeeCount);
-        const resultC = this.calculateDepartmentResult(deptEmployeesC, allocationCount['C'], 'C', totalEmployeeCount);
-
-        let score = 0;
-        if (objective === 'totalRevenue') {
-          score = resultA.finalRevenue + resultB.finalRevenue + resultC.finalRevenue;
-        } else if (objective === 'departmentAProfitMaximize') {
-          score = resultA.profit;
-        } else if (objective === 'departmentBRevenueMaximize') {
-          score = resultB.finalRevenue;
-        } else if (objective === 'departmentCRevenueMaximize') {
-          score = resultC.finalRevenue;
-        }
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestDept = dept;
-        }
-      }
-
-      allocation[bestDept][emp.id] = true;
-    }
-
-    return {
-      A: Object.keys(allocation['A']),
-      B: Object.keys(allocation['B']),
-      C: Object.keys(allocation['C']),
-    };
+    return this.findOptimalAllocationInternal(employees, objective, lockedEmployees);
   }
 
-  // Calculate optimal allocation using greedy algorithm
+  // Calculate optimal allocation using exhaustive search
   calculateOptimalAllocation(
     employees: Employee[],
     objective: DepartmentObjective,
     lockedEmployees: Record<string, string> = {}
   ): Record<string, number> {
-    const totalEmployeeCount = employees.length;
-    const minHeadcounts: Record<string, number> = {
-      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployeeCount / 100)),
-      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployeeCount / 100)),
-      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployeeCount / 100)),
-    };
+    const allocation = this.findOptimalAllocationInternal(employees, objective, lockedEmployees);
 
-    // Step 0: Lock specified employees to their designated departments
-    const allocation: Record<string, Record<string, boolean>> = {
-      A: {},
-      B: {},
-      C: {},
+    return {
+      A: allocation['A'].length,
+      B: allocation['B'].length,
+      C: allocation['C'].length,
     };
-    const allocatedEmployeeIds = new Set<string>();
+  }
 
-    for (const [empId, dept] of Object.entries(lockedEmployees)) {
-      if (allocation[dept]) {
-        allocation[dept][empId] = true;
-        allocatedEmployeeIds.add(empId);
-      }
+  // Internal verification method for testing (100 employees, no locks, total revenue maximization)
+  verifyOptimalAllocation(employees: Employee[]): {
+    optimalAllocation: Record<string, number>;
+    optimalRevenue: number;
+    optimalProfit: number;
+    localSolutionRevenue?: number;
+    localSolutionProfit?: number;
+    comparison: string[];
+  } {
+    if (employees.length !== 100) {
+      throw new Error('Verification test requires exactly 100 employees');
     }
 
-    // Step 0.5: Validate locked employees don't violate minimum (allow overfulfillment)
+    // Test objective: total revenue maximization
+    const objective: DepartmentObjective = 'totalRevenue';
+
+    // Find optimal allocation
+    const optimalAllocationIds = this.findOptimalAllocationInternal(employees, objective, {});
+    const optimalResult = this.simulateWithAllocation(employees, optimalAllocationIds, 100);
+
+    const optimalAllocation = {
+      A: optimalAllocationIds['A'].length,
+      B: optimalAllocationIds['B'].length,
+      C: optimalAllocationIds['C'].length,
+    };
+
+    const comparison: string[] = [];
+    comparison.push(`=== Optimal Allocation Verification (100 employees, Total Revenue Maximization) ===`);
+    comparison.push(`Optimal Allocation: A=${optimalAllocation.A}, B=${optimalAllocation.B}, C=${optimalAllocation.C}`);
+    comparison.push(`Optimal Total Revenue: ${optimalResult.summary.totalRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`Optimal Total Profit: ${optimalResult.summary.totalProfit.toFixed(4)} (100M JPY)`);
+    comparison.push(`Department A - Revenue: ${optimalResult.department['A'].finalRevenue.toFixed(4)}, Capability: ${optimalResult.department['A'].departmentCapability.toFixed(4)}, Fulfillment Rate: ${optimalResult.department['A'].fulfillmentRate.toFixed(4)}`);
+    comparison.push(`Department B - Revenue: ${optimalResult.department['B'].finalRevenue.toFixed(4)}, Capability: ${optimalResult.department['B'].departmentCapability.toFixed(4)}, Fulfillment Rate: ${optimalResult.department['B'].fulfillmentRate.toFixed(4)}`);
+    comparison.push(`Department C - Revenue: ${optimalResult.department['C'].finalRevenue.toFixed(4)}, Capability: ${optimalResult.department['C'].departmentCapability.toFixed(4)}, Fulfillment Rate: ${optimalResult.department['C'].fulfillmentRate.toFixed(4)}`);
+
+    // For comparison: test a known local solution (48/42/10)
+    let localSolutionRevenue: number | undefined;
+    let localSolutionProfit: number | undefined;
+
+    // Try to construct a 48/42/10 allocation if possible
+    const localAllocationIds: Record<string, string[]> = { A: [], B: [], C: [] };
+    for (let i = 0; i < Math.min(48, employees.length); i++) {
+      localAllocationIds['A'].push(employees[i].id);
+    }
+    for (let i = 48; i < Math.min(90, employees.length); i++) {
+      localAllocationIds['B'].push(employees[i].id);
+    }
+    for (let i = 90; i < employees.length; i++) {
+      localAllocationIds['C'].push(employees[i].id);
+    }
+
+    const localResult = this.simulateWithAllocation(employees, localAllocationIds, 100);
+    localSolutionRevenue = localResult.summary.totalRevenue;
+    localSolutionProfit = localResult.summary.totalProfit;
+
+    comparison.push(``);
+    comparison.push(`=== Comparison with Local Solution (48/42/10) ===`);
+    comparison.push(`Local Solution Revenue: ${localSolutionRevenue.toFixed(4)} (100M JPY)`);
+    comparison.push(`Local Solution Profit: ${localSolutionProfit.toFixed(4)} (100M JPY)`);
+    comparison.push(`Revenue Difference: ${(optimalResult.summary.totalRevenue - localSolutionRevenue).toFixed(4)} (Optimal is ${optimalResult.summary.totalRevenue > localSolutionRevenue ? 'better' : 'worse'})`);
+    comparison.push(`Profit Difference: ${(optimalResult.summary.totalProfit - localSolutionProfit).toFixed(4)} (Optimal is ${optimalResult.summary.totalProfit > localSolutionProfit ? 'better' : 'worse'})`);
+
+    return {
+      optimalAllocation,
+      optimalRevenue: optimalResult.summary.totalRevenue,
+      optimalProfit: optimalResult.summary.totalProfit,
+      localSolutionRevenue,
+      localSolutionProfit,
+      comparison,
+    };
+  }
+
+  // Debug method: evaluate specific allocation pattern
+  evaluateAllocationPattern(
+    employees: Employee[],
+    pattern: Record<string, number>,
+    objective: DepartmentObjective = 'totalRevenue'
+  ): {
+    allocation: Record<string, number>;
+    totalRevenue: number;
+    totalProfit: number;
+    departmentDetails: Record<string, any>;
+  } {
+    // Create a fixed allocation for testing
+    const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+    let idx = 0;
+
     for (const dept of ['A', 'B', 'C']) {
-      const lockedCount = Object.keys(allocation[dept]).length;
-      if (lockedCount > minHeadcounts[dept] * 2) {
-        console.warn(
-          `Warning: Department ${dept} has ${lockedCount} locked employees, exceeding 2x minimum (${minHeadcounts[dept] * 2})`
-        );
+      const needed = pattern[dept];
+      for (let i = 0; i < needed && idx < employees.length; i++) {
+        allocation[dept].push(employees[idx].id);
+        idx++;
       }
     }
 
-    // Step 1: Calculate contribution scores for each employee to each department
-    const contributionScores = new Map<string, Map<string, number>>();
-    ['A', 'B', 'C'].forEach((dept) => {
-      const deptScores = new Map<string, number>();
-      employees.forEach((emp) => {
-        deptScores.set(emp.id, this.calculateEmployeeContribution(emp, dept));
-      });
-      contributionScores.set(dept, deptScores);
-    });
+    const result = this.simulateWithAllocation(employees, allocation, employees.length);
 
-    // Step 2: Ensure minimum allocation for each department (including locked employees)
-    for (const dept of ['A', 'B', 'C']) {
-      const scaledMinimum = minHeadcounts[dept];
-      const deptScores = contributionScores.get(dept)!;
-      const currentAllocated = Object.keys(allocation[dept]).length;
-
-      if (currentAllocated < scaledMinimum) {
-        const sortedEmployees = employees
-          .filter((emp) => !allocatedEmployeeIds.has(emp.id))
-          .sort(
-            (a, b) =>
-              (deptScores.get(b.id) || 0) - (deptScores.get(a.id) || 0)
-          );
-
-        for (let i = 0; i < scaledMinimum - currentAllocated && i < sortedEmployees.length; i++) {
-          const emp = sortedEmployees[i];
-          allocation[dept][emp.id] = true;
-          allocatedEmployeeIds.add(emp.id);
-        }
-      }
-    }
-
-    // Step 3: Allocate remaining employees based on objective
-    const remainingEmployees = employees.filter(
-      (emp) => !allocatedEmployeeIds.has(emp.id)
-    );
-
-    for (const emp of remainingEmployees) {
-      let bestDept = 'A';
-      let bestScore = -Infinity;
-
-      for (const dept of ['A', 'B', 'C']) {
-        // Create test allocation
-        const testAllocation: Record<string, Record<string, boolean>> = {
-          A: { ...allocation['A'] },
-          B: { ...allocation['B'] },
-          C: { ...allocation['C'] },
-        };
-        testAllocation[dept][emp.id] = true;
-
-        // Convert to allocation count
-        const allocationCount: Record<string, number> = {
-          A: Object.keys(testAllocation['A']).length,
-          B: Object.keys(testAllocation['B']).length,
-          C: Object.keys(testAllocation['C']).length,
-        };
-
-        // Get employees for each department
-        const deptEmployeesA = employees.filter(
-          (e) => testAllocation['A'][e.id]
-        );
-        const deptEmployeesB = employees.filter(
-          (e) => testAllocation['B'][e.id]
-        );
-        const deptEmployeesC = employees.filter(
-          (e) => testAllocation['C'][e.id]
-        );
-
-        // Calculate results for test allocation
-        const resultA = this.calculateDepartmentResult(
-          deptEmployeesA,
-          allocationCount['A'],
-          'A',
-          totalEmployeeCount
-        );
-        const resultB = this.calculateDepartmentResult(
-          deptEmployeesB,
-          allocationCount['B'],
-          'B',
-          totalEmployeeCount
-        );
-        const resultC = this.calculateDepartmentResult(
-          deptEmployeesC,
-          allocationCount['C'],
-          'C',
-          totalEmployeeCount
-        );
-
-        let score = 0;
-        if (objective === 'totalRevenue') {
-          score =
-            resultA.finalRevenue +
-            resultB.finalRevenue +
-            resultC.finalRevenue;
-        } else if (objective === 'departmentAProfitMaximize') {
-          score = resultA.profit;
-        } else if (objective === 'departmentBRevenueMaximize') {
-          score = resultB.finalRevenue;
-        } else if (objective === 'departmentCRevenueMaximize') {
-          score = resultC.finalRevenue;
-        }
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestDept = dept;
-        }
-      }
-
-      allocation[bestDept][emp.id] = true;
-    }
-
-    // Convert allocation map to count format
-    const result: Record<string, number> = {
-      A: Object.keys(allocation['A']).length,
-      B: Object.keys(allocation['B']).length,
-      C: Object.keys(allocation['C']).length,
+    return {
+      allocation: {
+        A: allocation['A'].length,
+        B: allocation['B'].length,
+        C: allocation['C'].length,
+      },
+      totalRevenue: result.summary.totalRevenue,
+      totalProfit: result.summary.totalProfit,
+      departmentDetails: {
+        A: {
+          revenue: result.department['A'].finalRevenue,
+          capability: result.department['A'].departmentCapability,
+          fulfillmentRate: result.department['A'].fulfillmentRate,
+          shortageCoefficient: result.department['A'].shortageCoefficient,
+          surplusCoefficient: result.department['A'].surplusCoefficient,
+        },
+        B: {
+          revenue: result.department['B'].finalRevenue,
+          capability: result.department['B'].departmentCapability,
+          fulfillmentRate: result.department['B'].fulfillmentRate,
+          shortageCoefficient: result.department['B'].shortageCoefficient,
+          surplusCoefficient: result.department['B'].surplusCoefficient,
+        },
+        C: {
+          revenue: result.department['C'].finalRevenue,
+          capability: result.department['C'].departmentCapability,
+          fulfillmentRate: result.department['C'].fulfillmentRate,
+          shortageCoefficient: result.department['C'].shortageCoefficient,
+          surplusCoefficient: result.department['C'].surplusCoefficient,
+        },
+      },
     };
-
-    return result;
   }
 }
