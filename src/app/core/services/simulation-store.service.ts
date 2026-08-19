@@ -234,7 +234,7 @@ export class SimulationStoreService {
               C: result.department['C'].allocatedEmployeeIds || [],
             };
 
-            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
             this.reasonText.set(reasoningText);
             this.allocatedEmployeeIds.set(allocatedIds);
@@ -257,7 +257,7 @@ export class SimulationStoreService {
               C: result.department['C'].allocatedEmployeeIds || [],
             };
 
-            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
             this.reasonText.set(reasoningText);
             this.allocatedEmployeeIds.set(allocatedIds);
@@ -472,12 +472,13 @@ export class SimulationStoreService {
     result: AllocationResult,
     objective: DepartmentObjective,
     employees: Employee[],
-    allocatedIds: Record<string, string[]>
+    allocatedIds: Record<string, string[]>,
+    totalEmployees: number
   ): string {
     const deptA = result.department['A'];
     const deptB = result.department['B'];
     const deptC = result.department['C'];
-    const is110Mode = employees.length === 110;
+    const is110Mode = totalEmployees === 110;
     const baselineResult = this.simulationResult100$.value;
 
     // Map objective to human-readable text
@@ -577,12 +578,7 @@ export class SimulationStoreService {
         reasoning += `売上${totalRevenue}億円、利益${totalProfit}億円を達成しました。`;
       }
     } else {
-      if (avoidedPenalties.length > 0) {
-        reasoning += `${avoidedPenalties.join('および')}を回避し、`;
-      } else {
-        reasoning += `各事業部の最低要員確保を成功させ、`;
-      }
-      reasoning += `全社コスト${totalCost}億円で売上${totalRevenue}億円を達成しました。`;
+      reasoning += `100名での最適配置により、全社売上${totalRevenue}億円、全社利益${totalProfit}億円を実現しました。`;
     }
 
     return reasoning;
