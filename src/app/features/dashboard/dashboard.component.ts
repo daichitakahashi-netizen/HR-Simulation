@@ -41,6 +41,7 @@ export class DashboardComponent implements OnInit {
   private store = inject(SimulationStoreService);
   private dialog = inject(MatDialog);
   private snackBar = inject(MatSnackBar);
+  readonly Object = Object;
 
   readonly isLoading = this.store.isLoading;
   readonly simulationResult = this.store.simulationResult;
@@ -49,12 +50,19 @@ export class DashboardComponent implements OnInit {
   readonly employeeCount = this.store.employeeCount;
   readonly reasonText = this.store.reasonText;
   readonly is110Mode = this.store.is110Mode;
+  readonly has110Data = this.store.has110Data;
+  readonly insufficientDataWarning = this.store.insufficientDataWarning;
 
   departments = [
     { id: 'A', label: '事業部A' },
     { id: 'B', label: '事業部B' },
     { id: 'C', label: '事業部C' },
   ];
+
+  readonly lockedEmployees = this.store.lockedEmployees;
+  readonly hasLockedEmployees = computed(() => {
+    return Object.keys(this.store.lockedEmployees()).length > 0;
+  });
 
   objectives = [
     { value: 'totalRevenue', label: '全社売上最大化' },
@@ -282,5 +290,18 @@ export class DashboardComponent implements OnInit {
     if (!deptDiff) return 0;
 
     return deptDiff[metric];
+  }
+
+  // Safely format numeric values, handling NaN/undefined
+  safeFormatNumber(value: number | undefined | null, digits: string = '1.2-2'): string {
+    if (value === null || value === undefined || isNaN(value)) {
+      return '—';
+    }
+    return new Intl.NumberFormat('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  }
+
+  // Check if a number is valid (not NaN, not undefined, not null)
+  isValidNumber(value: number | undefined | null): boolean {
+    return value !== null && value !== undefined && !isNaN(value);
   }
 }

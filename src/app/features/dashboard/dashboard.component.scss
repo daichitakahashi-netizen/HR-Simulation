@@ -56,14 +56,33 @@
 
   .objective-section {
     flex-shrink: 0;
-
-    .objective-field {
+    .objective-field { width: 100%; }
+    .lock-chip {
       width: 100%;
+      height: auto;
+      padding: 0.5rem 0.75rem;
+      background-color: #e3f2fd !important;
+      color: #1976d2 !important;
+      font-size: 0.8rem;
+      font-weight: 500;
+      margin-top: 0.75rem;
     }
   }
 
   .toggle-section {
     flex-shrink: 0;
+    .failsafe-warning {
+      margin-top: 0.75rem;
+      background-color: #fff3cd;
+      border-left: 4px solid #ffc107;
+      mat-card-content { padding: 0.75rem; }
+      p {
+        margin: 0;
+        font-size: 0.8rem;
+        color: #856404;
+        line-height: 1.4;
+      }
+    }
   }
 
   .slide-toggle-wrapper {

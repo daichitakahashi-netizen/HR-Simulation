@@ -23,6 +23,7 @@ export class SimulationStoreService {
   readonly simulationResult100$ = new BehaviorSubject<AllocationResult | null>(null);
   readonly simulationResult110$ = new BehaviorSubject<AllocationResult | null>(null);
   readonly reasoningText$ = new BehaviorSubject<string>('');
+  readonly has110Data$ = new BehaviorSubject<boolean>(false);
 
   // Compatibility layer for signal-based components
   readonly simulationResult = signal<AllocationResult | null>(null);
@@ -36,6 +37,8 @@ export class SimulationStoreService {
   readonly employeeCount = signal<number>(100);
   readonly allocatedEmployeeIds = signal<Record<string, string[]>>({ A: [], B: [], C: [] });
   readonly is110Mode = signal<boolean>(false);
+  readonly has110Data = signal<boolean>(false);
+  readonly insufficientDataWarning = signal<string>('');
 
   private simulationWorker: Worker | null = null;
   private snackBar = inject(MatSnackBar);
@@ -100,11 +103,14 @@ export class SimulationStoreService {
             const { result100, result110 } = results;
             this.simulationResult100$.next(result100);
             this.simulationResult110$.next(result110);
+            this.has110Data.set(result110 !== null);
 
-            const displayResult = this.is110Mode() ? result110 : result100;
-            this.simulationResult.set(displayResult);
-            this.baselineResult.set(result100);
-            this.allocation.set(displayResult.allocation);
+            const displayResult = this.is110Mode() ? (result110 || result100) : result100;
+            if (displayResult) {
+              this.simulationResult.set(displayResult);
+              this.baselineResult.set(result100);
+              this.allocation.set(displayResult.allocation);
+            }
           }
           this.isLoading.set(false);
         })
@@ -118,7 +124,23 @@ export class SimulationStoreService {
         this.is110Mode.set(is110Mode);
         const result100 = this.simulationResult100$.value;
         const result110 = this.simulationResult110$.value;
-        const displayResult = is110Mode ? result110 : result100;
+
+        // Check if 110-mode data is available
+        const has110Data = result110 !== null;
+        this.has110Data.set(has110Data);
+
+        // Failsafe: if 110-mode is requested but data is not available, use 100-mode result
+        let displayResult = result100;
+        if (is110Mode && has110Data) {
+          displayResult = result110;
+        } else if (is110Mode && !has110Data) {
+          // Failsafe warning
+          this.insufficientDataWarning.set('※110名用人事データ（追加10名）が読み込まれていないため、100名でのシミュレーション結果を表示しています');
+          displayResult = result100;
+        } else {
+          this.insufficientDataWarning.set('');
+        }
+
         if (displayResult) {
           this.simulationResult.set(displayResult);
           this.allocation.set(displayResult.allocation);
