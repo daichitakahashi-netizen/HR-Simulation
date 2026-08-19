@@ -32,6 +32,8 @@ export class SimulationStoreService {
   readonly allocation = signal<AllocationMap>({});
   readonly selectedObjective = signal<string>('totalRevenue');
   readonly reasonText = signal<string>('');
+  readonly reasonText100 = signal<string>('');
+  readonly reasonText110 = signal<string>('');
   readonly lockedEmployees = signal<Record<string, string>>({});
   readonly isLoading = signal<boolean>(false);
   readonly employeeCount = signal<number>(100);
@@ -145,6 +147,8 @@ export class SimulationStoreService {
           this.simulationResult.set(displayResult);
           this.allocation.set(displayResult.allocation);
         }
+
+        this.updateDisplayReasonText();
       })
     ).subscribe();
 
@@ -236,7 +240,12 @@ export class SimulationStoreService {
 
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
-            this.reasonText.set(reasoningText);
+            if (totalEmployees === 100) {
+              this.reasonText100.set(reasoningText);
+            } else {
+              this.reasonText110.set(reasoningText);
+            }
+            this.updateDisplayReasonText();
             this.allocatedEmployeeIds.set(allocatedIds);
 
             this.simulationWorker!.removeEventListener('message', handleMessage);
@@ -259,7 +268,12 @@ export class SimulationStoreService {
 
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
-            this.reasonText.set(reasoningText);
+            if (totalEmployees === 100) {
+              this.reasonText100.set(reasoningText);
+            } else {
+              this.reasonText110.set(reasoningText);
+            }
+            this.updateDisplayReasonText();
             this.allocatedEmployeeIds.set(allocatedIds);
 
             this.simulationWorker!.removeEventListener('message', handleMessage);
@@ -452,6 +466,18 @@ export class SimulationStoreService {
     }
 
     return null;
+  }
+
+  private updateDisplayReasonText(): void {
+    const is110Mode = this.is110Mode();
+    const reasonText100 = this.reasonText100();
+    const reasonText110 = this.reasonText110();
+
+    if (is110Mode) {
+      this.reasonText.set(reasonText110 || reasonText100);
+    } else {
+      this.reasonText.set(reasonText100);
+    }
   }
 
   getState() {

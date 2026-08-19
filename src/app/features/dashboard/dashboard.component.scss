@@ -407,14 +407,14 @@
   }
 
   .penalty-accordion {
-    margin-top: 0.3rem;
+    margin-top: 0.2rem;
   }
 
   .penalty-details {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.2rem 0;
+    gap: 0.15rem;
+    padding: 0;
   }
 
   .penalty-row {
@@ -422,19 +422,25 @@
     justify-content: space-between;
     align-items: center;
     font-size: 0.7rem;
+    padding: 0.1rem 0;
+    min-width: 0;
 
     span {
       color: #666;
+      flex: 1;
     }
 
     strong {
       color: #d32f2f;
       font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-left: 0.25rem;
     }
   }
 
   .member-button-container {
-    margin-top: 0.5rem;
+    margin-top: 0.4rem;
     display: flex;
     justify-content: center;
     flex-shrink: 0;
@@ -443,11 +449,12 @@
 
   .member-button {
     width: 100%;
-    white-space: normal;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     height: auto;
-    padding: 0.5rem 0.75rem;
-    line-height: 1.3;
-    font-size: 0.85rem;
+    padding: 0.3rem 0.5rem;
+    line-height: 1.2;
+    font-size: 0.75rem;
   }
 }
 
