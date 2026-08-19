@@ -75,12 +75,17 @@ export class SimulationStoreService {
         distinctUntilChanged((prev, curr) => {
           return JSON.stringify(prev) === JSON.stringify(curr);
         }),
-        tap(() => this.isLoading.set(true)),
+        tap(() => {
+          console.log('[Store] Employees/Objective changed, setting loading state');
+          this.isLoading.set(true);
+        }),
         switchMap(([employees, objective]) => {
+          console.log('[Store] Switch to simulation with', employees.length, 'employees and objective:', objective);
           this.employees.set(employees);
           this.selectedObjective.set(objective);
 
           if (employees.length === 0) {
+            console.log('[Store] No employees, skipping simulation');
             this.isLoading.set(false);
             return of(null);
           }
@@ -90,6 +95,7 @@ export class SimulationStoreService {
           return this.runDualSimulation(employees, objective, lockedEmployees);
         }),
         tap((results) => {
+          console.log('[Store] Simulation results received:', results ? 'success' : 'null');
           if (results) {
             const { result100, result110 } = results;
             this.simulationResult100$.next(result100);
@@ -99,6 +105,9 @@ export class SimulationStoreService {
             this.simulationResult.set(displayResult);
             this.baselineResult.set(result100);
             this.allocation.set(displayResult.allocation);
+          } else {
+            console.warn('[Store] Simulation returned null results');
+            this.snackBar.open('シミュレーション計算に失敗しました', '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
           }
           this.isLoading.set(false);
         })
@@ -134,15 +143,32 @@ export class SimulationStoreService {
       let result110: AllocationResult | null = null;
       let completed100 = false;
       let completed110 = false;
+      let hasError = false;
 
       const checkCompletion = () => {
-        if (completed100 && completed110 && result100 && result110) {
-          observer.next({ result100, result110 });
-          observer.complete();
+        if (completed100 && completed110) {
+          console.log('[Store] Both simulations completed. Checking results...');
+          if (hasError && (!result100 || !result110)) {
+            console.error('[Store] One or both simulations failed');
+            observer.next(null);
+            observer.complete();
+            return;
+          }
+
+          if (result100 && result110) {
+            console.log('[Store] Both results received successfully. Emitting combined results.');
+            observer.next({ result100, result110 });
+            observer.complete();
+          } else if (!result100 || !result110) {
+            console.warn('[Store] One simulation returned null (100=' + (result100 ? 'OK' : 'null') + ', 110=' + (result110 ? 'OK' : 'null') + ')');
+            observer.next(null);
+            observer.complete();
+          }
         }
       };
 
-      // Run 100-employee simulation first
+      // Run 100-employee simulation
+      console.log('[Store] Starting 100-employee simulation');
       this.runSimulationWithHybridEngine(
         employees,
         objective,
@@ -150,20 +176,25 @@ export class SimulationStoreService {
         lockedEmployees
       ).subscribe({
         next: (result) => {
+          console.log('[Store] 100-employee simulation resolved:', result ? 'with result' : 'null');
           if (result) {
             result100 = result;
+          } else {
+            hasError = true;
           }
           completed100 = true;
           checkCompletion();
         },
         error: (error) => {
-          console.error('Error in 100-employee simulation:', error);
+          console.error('[Store] 100-employee simulation error:', error);
+          hasError = true;
           completed100 = true;
           checkCompletion();
         },
       });
 
       // Run 110-employee simulation with mock employees added
+      console.log('[Store] Starting 110-employee simulation');
       const extendedEmployees = this.addMockEmployees(employees, 10);
       this.runSimulationWithHybridEngine(
         extendedEmployees,
@@ -172,14 +203,18 @@ export class SimulationStoreService {
         lockedEmployees
       ).subscribe({
         next: (result) => {
+          console.log('[Store] 110-employee simulation resolved:', result ? 'with result' : 'null');
           if (result) {
             result110 = result;
+          } else {
+            hasError = true;
           }
           completed110 = true;
           checkCompletion();
         },
         error: (error) => {
-          console.error('Error in 110-employee simulation:', error);
+          console.error('[Store] 110-employee simulation error:', error);
+          hasError = true;
           completed110 = true;
           checkCompletion();
         },
@@ -195,7 +230,8 @@ export class SimulationStoreService {
   ): Observable<AllocationResult | null> {
     return new Observable((observer) => {
       if (!this.simulationWorker) {
-        console.error('Web Worker not available and no fallback calculation available');
+        console.error('[Store] Web Worker not available and no fallback calculation available');
+        this.snackBar.open('Web Workerが利用できません', '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
         observer.next(null);
         observer.complete();
         return;
@@ -203,36 +239,81 @@ export class SimulationStoreService {
 
       const handleMessage = (event: MessageEvent) => {
         try {
+          console.log('[Store] Received message from worker:', event.data.type || 'LEGACY');
+
+          const { type, data, error, stack } = event.data;
+
+          if (type === 'ERROR') {
+            console.error('[Store] Worker reported error:', error, stack);
+            this.snackBar.open(`計算エラー: ${error}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
+            this.simulationWorker!.removeEventListener('message', handleMessage);
+            this.simulationWorker!.removeEventListener('error', handleError);
+            observer.next(null);
+            observer.complete();
+            return;
+          }
+
+          if (type === 'SUCCESS' && data) {
+            console.log('[Store] Processing SUCCESS message from worker');
+            const result = data as AllocationResult;
+
+            const allocatedIds = {
+              A: result.department['A'].allocatedEmployeeIds || [],
+              B: result.department['B'].allocatedEmployeeIds || [],
+              C: result.department['C'].allocatedEmployeeIds || [],
+            };
+
+            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+            this.reasoningText$.next(reasoningText);
+            this.reasonText.set(reasoningText);
+            this.allocatedEmployeeIds.set(allocatedIds);
+
+            this.simulationWorker!.removeEventListener('message', handleMessage);
+            this.simulationWorker!.removeEventListener('error', handleError);
+            console.log('[Store] Emitting result via observer.next()');
+            observer.next(result);
+            observer.complete();
+            return;
+          }
+
+          // Fallback: treat as AllocationResult if no type field (backward compatibility)
           const result = event.data as AllocationResult;
+          if (result.allocation && result.department) {
+            console.log('[Store] Processing LEGACY message format (no type field)');
+            const allocatedIds = {
+              A: result.department['A'].allocatedEmployeeIds || [],
+              B: result.department['B'].allocatedEmployeeIds || [],
+              C: result.department['C'].allocatedEmployeeIds || [],
+            };
 
-          const allocatedIds = {
-            A: result.department['A'].allocatedEmployeeIds || [],
-            B: result.department['B'].allocatedEmployeeIds || [],
-            C: result.department['C'].allocatedEmployeeIds || [],
-          };
+            const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
+            this.reasoningText$.next(reasoningText);
+            this.reasonText.set(reasoningText);
+            this.allocatedEmployeeIds.set(allocatedIds);
 
-          const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
-          this.reasoningText$.next(reasoningText);
-          this.reasonText.set(reasoningText);
-          this.allocatedEmployeeIds.set(allocatedIds);
-
-          this.simulationWorker!.removeEventListener('message', handleMessage);
-          this.simulationWorker!.removeEventListener('error', handleError);
-          observer.next(result);
-          observer.complete();
+            this.simulationWorker!.removeEventListener('message', handleMessage);
+            this.simulationWorker!.removeEventListener('error', handleError);
+            console.log('[Store] Emitting result via observer.next()');
+            observer.next(result);
+            observer.complete();
+          }
         } catch (error) {
-          handleError(error as ErrorEvent);
+          console.error('[Store] Error processing worker message:', error);
+          handleError(error as any);
         }
       };
 
       const handleError = (error: ErrorEvent | any) => {
-        console.error('Worker error:', error);
+        console.error('[Store] Worker error event:', error);
+        const errorMsg = error instanceof ErrorEvent ? error.message : (error?.message || 'Unknown worker error');
+        this.snackBar.open(`Workerエラー: ${errorMsg}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
         this.simulationWorker!.removeEventListener('message', handleMessage);
         this.simulationWorker!.removeEventListener('error', handleError);
         observer.next(null);
         observer.complete();
       };
 
+      console.log('[Store] Posting message to worker (totalEmployees=' + totalEmployees + ')');
       this.simulationWorker.addEventListener('message', handleMessage);
       this.simulationWorker.addEventListener('error', handleError);
 
@@ -252,19 +333,23 @@ export class SimulationStoreService {
 
   loadInitialData(count: number = 100): void {
     this.isLoading.set(true);
+    console.log('[Store] Loading initial CSV data');
 
     this.httpClient.get('/assets/human_resources_100.csv', {
       responseType: 'text',
     }).subscribe({
       next: (csvText) => {
+        console.log('[Store] CSV loaded successfully');
         let parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
+        console.log('[Store] CSV parsed, employee count:', parsedEmployees.length);
 
         // Always load 100-employee base data; later use runDualSimulation for both 100 and 110
+        // Note: isLoading state will be managed by reactive flow (setupReactiveDataFlow)
         this.employees$.next(parsedEmployees);
-        this.isLoading.set(false);
       },
       error: (error) => {
-        console.error('Failed to load CSV:', error);
+        console.error('[Store] Failed to load CSV:', error);
+        this.snackBar.open(`CSVの読み込みに失敗しました: ${error.message || error}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
         this.isLoading.set(false);
       },
     });

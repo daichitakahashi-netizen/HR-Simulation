@@ -152,8 +152,8 @@ class HybridSimulationEngine {
       (emp) => !lockedEmployees || !lockedEmployees[emp.id]
     );
 
-    // Strategy 1: Multiple random allocations (30 iterations)
-    for (let i = 0; i < 30; i++) {
+    // Strategy 1: Multiple random allocations (8 iterations - reduced from 30)
+    for (let i = 0; i < 8; i++) {
       const shuffled = [...unlockedEmployees].sort(() => Math.random() - 0.5);
       const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
 
@@ -176,8 +176,8 @@ class HybridSimulationEngine {
       initialAllocations.push(allocation);
     }
 
-    // Strategy 2: Stratified random allocations (10 iterations)
-    for (let i = 0; i < 10; i++) {
+    // Strategy 2: Stratified random allocations (4 iterations - reduced from 10)
+    for (let i = 0; i < 4; i++) {
       const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
 
       // Place locked employees
@@ -249,7 +249,7 @@ class HybridSimulationEngine {
     return initialAllocations;
   }
 
-  // 局所探索：スワップベースで改善
+  // 局所探索：In-place swap + First-Improvement による高速化
   private improveViaLocalSearch(
     employees: Employee[],
     allocation: Record<string, string[]>,
@@ -257,7 +257,11 @@ class HybridSimulationEngine {
     pattern: AllocationPattern,
     maxIterations: number = 200
   ): Record<string, string[]> {
-    let currentAllocation = JSON.parse(JSON.stringify(allocation));
+    let currentAllocation: Record<string, string[]> = {
+      A: [...allocation['A']],
+      B: [...allocation['B']],
+      C: [...allocation['C']],
+    };
     let currentResult = this.simulateAllocation(
       employees,
       currentAllocation,
@@ -268,31 +272,28 @@ class HybridSimulationEngine {
     let improved = true;
     let iterations = 0;
     const tolerance = 1e-8;
+    const depts = ['A', 'B', 'C'];
 
     while (improved && iterations < maxIterations) {
       improved = false;
       iterations++;
 
-      const depts = ['A', 'B', 'C'];
-
-      // Try swapping employees between departments
-      for (let i = 0; i < depts.length; i++) {
+      // First-Improvement: swap見つけたら即座に適用して次イテレーションへ
+      outerLoop: for (let i = 0; i < depts.length; i++) {
         for (let j = i + 1; j < depts.length; j++) {
           const dept1 = depts[i];
           const dept2 = depts[j];
 
           for (let k = 0; k < currentAllocation[dept1].length; k++) {
             for (let l = 0; l < currentAllocation[dept2].length; l++) {
-              const testAllocation = JSON.parse(
-                JSON.stringify(currentAllocation)
-              );
-              const temp = testAllocation[dept1][k];
-              testAllocation[dept1][k] = testAllocation[dept2][l];
-              testAllocation[dept2][l] = temp;
+              // In-place swap
+              const temp = currentAllocation[dept1][k];
+              currentAllocation[dept1][k] = currentAllocation[dept2][l];
+              currentAllocation[dept2][l] = temp;
 
               const testResult = this.simulateAllocation(
                 employees,
-                testAllocation,
+                currentAllocation,
                 employees.length
               );
               const testScore = this.calculateObjectiveScore(
@@ -301,18 +302,20 @@ class HybridSimulationEngine {
               );
 
               if (testScore > currentScore + tolerance) {
-                currentAllocation = testAllocation;
+                // Improvement found - keep the swap and continue
                 currentScore = testScore;
                 currentResult = testResult;
                 improved = true;
-                break;
+                break outerLoop;
+              } else {
+                // Revert swap if no improvement
+                const revert = currentAllocation[dept1][k];
+                currentAllocation[dept1][k] = currentAllocation[dept2][l];
+                currentAllocation[dept2][l] = revert;
               }
             }
-            if (improved) break;
           }
-          if (improved) break;
         }
-        if (improved) break;
       }
     }
 
@@ -335,14 +338,11 @@ class HybridSimulationEngine {
     return result.summary.totalRevenue;
   }
 
-  // Step 2: 各パターンに対して最適な割り当て（社員の最適配置）を実行
-  private optimizeAllocationForPattern(
-    employees: Employee[],
+  // Validate locked employees
+  private validateLockedEmployees(
     pattern: AllocationPattern,
-    objective: DepartmentObjective,
     lockedEmployees?: Record<string, string>
-  ): { allocation: Record<string, string[]>; score: number } {
-    // Validate locked employees against pattern
+  ): { valid: boolean; lockedCounts: Record<string, number> } {
     const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
     if (lockedEmployees) {
       for (const dept of Object.values(lockedEmployees)) {
@@ -352,14 +352,70 @@ class HybridSimulationEngine {
       }
     }
 
-    // Check if locked allocation exceeds pattern
     for (const dept of ['A', 'B', 'C']) {
       if (lockedCounts[dept] > pattern[dept as keyof AllocationPattern]) {
-        return {
-          allocation: { A: [], B: [], C: [] },
-          score: -Infinity,
-        };
+        return { valid: false, lockedCounts };
       }
+    }
+    return { valid: true, lockedCounts };
+  }
+
+  // Stage 1: Quick screening - evaluate pattern with minimal iterations
+  private screeningOptimizeAllocationForPattern(
+    employees: Employee[],
+    pattern: AllocationPattern,
+    objective: DepartmentObjective,
+    lockedEmployees?: Record<string, string>
+  ): { allocation: Record<string, string[]>; score: number } {
+    const { valid } = this.validateLockedEmployees(pattern, lockedEmployees);
+    if (!valid) {
+      return {
+        allocation: { A: [], B: [], C: [] },
+        score: -Infinity,
+      };
+    }
+
+    // Use only 1 random initial allocation with 2 iterations max
+    const initialAllocations = this.generateDiverseInitialAllocations(
+      employees,
+      pattern,
+      lockedEmployees
+    );
+
+    let bestScore = -Infinity;
+    let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
+
+    // Evaluate first allocation only (quick screening)
+    if (initialAllocations.length > 0) {
+      const improvedAllocation = this.improveViaLocalSearch(
+        employees,
+        initialAllocations[0],
+        objective,
+        pattern,
+        2 // Minimal iterations for screening
+      );
+
+      const result = this.simulateAllocation(employees, improvedAllocation, employees.length);
+      bestScore = this.calculateObjectiveScore(result, objective);
+      bestAllocation = improvedAllocation;
+    }
+
+    return { allocation: bestAllocation, score: bestScore };
+  }
+
+  // Stage 2: Thorough optimization - full search for top patterns
+  private thoroughOptimizeAllocationForPattern(
+    employees: Employee[],
+    pattern: AllocationPattern,
+    objective: DepartmentObjective,
+    lockedEmployees?: Record<string, string>
+  ): { allocation: Record<string, string[]>; score: number } {
+    const { valid } = this.validateLockedEmployees(pattern, lockedEmployees);
+    if (!valid) {
+      return {
+        allocation: { A: [], B: [], C: [] },
+        score: -Infinity,
+      };
     }
 
     const initialAllocations = this.generateDiverseInitialAllocations(
@@ -461,7 +517,7 @@ class HybridSimulationEngine {
     return result;
   }
 
-  // メイン：ハイブリッド計算アルゴリズム
+  // メイン：2段階ハイブリッド計算アルゴリズム
   runHybridSimulation(
     employees: Employee[],
     objective: DepartmentObjective,
@@ -470,14 +526,39 @@ class HybridSimulationEngine {
   ): AllocationResult {
     // Step 1: 制約のクリア - 有効な人数構成パターンをすべて生成
     const patterns = this.generateValidAllocationPatterns(totalEmployees);
+    console.log(`[Worker] Generated ${patterns.length} valid allocation patterns for ${totalEmployees} employees`);
 
+    // Stage 1: Quick screening - evaluate all patterns with minimal iterations
+    console.log('[Worker] Stage 1: Starting quick screening phase...');
+    const screeningResults: Array<{ pattern: AllocationPattern; score: number }> = [];
+    for (const pattern of patterns) {
+      const { score } = this.screeningOptimizeAllocationForPattern(
+        employees,
+        pattern,
+        objective,
+        lockedEmployees
+      );
+
+      if (score > -Infinity) {
+        screeningResults.push({ pattern, score });
+      }
+    }
+    console.log(`[Worker] Stage 1 Screening complete. Evaluated ${screeningResults.length} patterns.`);
+
+    // Select top patterns for thorough optimization
+    // Keep top 15 patterns only for precision search
+    screeningResults.sort((a, b) => b.score - a.score);
+    const topPatterns = screeningResults.slice(0, 15).map((r) => r.pattern);
+    console.log(`[Worker] Stage 2: Starting precision search on top 15 patterns...`);
+
+    // Stage 2: Thorough optimization - full search for top patterns
     let bestAllocation: Record<string, string[]> = { A: [], B: [], C: [] };
     let bestScore = -Infinity;
     let bestResult: AllocationResult | null = null;
 
-    // Step 2 & 3: 各パターンに対して最適割り当てを実施
-    for (const pattern of patterns) {
-      const { allocation, score } = this.optimizeAllocationForPattern(
+    for (let i = 0; i < topPatterns.length; i++) {
+      const pattern = topPatterns[i];
+      const { allocation, score } = this.thoroughOptimizeAllocationForPattern(
         employees,
         pattern,
         objective,
@@ -485,7 +566,7 @@ class HybridSimulationEngine {
       );
 
       if (score === -Infinity) {
-        continue; // Skip invalid patterns
+        continue;
       }
 
       const result = this.simulateAllocation(employees, allocation, totalEmployees);
@@ -499,12 +580,14 @@ class HybridSimulationEngine {
         }
       }
     }
+    console.log(`[Worker] Stage 2 Precision search complete.`);
 
     // フォールバック：制約を満たすパターンがない場合、最高スコアパターンを返す
-    if (!bestResult) {
+    if (!bestResult && topPatterns.length > 0) {
+      console.log('[Worker] No result met revenue constraint, using fallback...');
       bestScore = -Infinity;
-      for (const pattern of patterns) {
-        const { allocation, score } = this.optimizeAllocationForPattern(
+      for (const pattern of topPatterns) {
+        const { allocation, score } = this.thoroughOptimizeAllocationForPattern(
           employees,
           pattern,
           objective,
@@ -521,6 +604,10 @@ class HybridSimulationEngine {
           );
         }
       }
+    }
+
+    if (bestResult) {
+      console.log(`[Worker] Final result: A=${bestResult.allocation['A']}, B=${bestResult.allocation['B']}, C=${bestResult.allocation['C']}, TotalRevenue=${bestResult.summary.totalRevenue.toFixed(2)}B`);
     }
 
     return bestResult || this.generateDefaultResult(totalEmployees);
@@ -596,6 +683,8 @@ const engine = new HybridSimulationEngine();
 
 // Listen for messages from the main thread
 addEventListener('message', ({ data }: MessageEvent<WorkerMessage>) => {
+  console.log('[Worker] Received message:', { employees: data.employees?.length, objective: data.objective, totalEmployees: data.totalEmployees });
+
   try {
     const result = engine.runHybridSimulation(
       data.employees,
@@ -604,10 +693,17 @@ addEventListener('message', ({ data }: MessageEvent<WorkerMessage>) => {
       data.lockedEmployees
     );
 
-    postMessage(result);
-  } catch (error) {
+    console.log('[Worker] Simulation complete, posting result');
     postMessage({
+      type: 'SUCCESS',
+      data: result,
+    });
+  } catch (error) {
+    console.error('[Worker] Error during simulation:', error);
+    postMessage({
+      type: 'ERROR',
       error: error instanceof Error ? error.message : 'Unknown error occurred',
+      stack: error instanceof Error ? error.stack : '',
     });
   }
 });
