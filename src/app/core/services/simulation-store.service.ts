@@ -61,9 +61,13 @@ export class SimulationStoreService {
   }
 
   private setupReactiveDataFlow(): void {
+    // Create a trigger for locked employees changes
+    const lockedEmployeesTrigger$ = new BehaviorSubject<Record<string, string>>({});
+
     combineLatest([
       this.employees$,
       this.currentObjective$,
+      lockedEmployeesTrigger$,
     ])
       .pipe(
         distinctUntilChanged((prev, curr) => {
@@ -114,6 +118,9 @@ export class SimulationStoreService {
         }
       })
     ).subscribe();
+
+    // Store the locked employees trigger for later use
+    (this as any).lockedEmployeesTrigger$ = lockedEmployeesTrigger$;
   }
 
   private runDualSimulation(
@@ -155,9 +162,10 @@ export class SimulationStoreService {
         },
       });
 
-      // Run 110-employee simulation
+      // Run 110-employee simulation with mock employees added
+      const extendedEmployees = this.addMockEmployees(employees, 10);
       this.runSimulationWithHybridEngine(
-        employees,
+        extendedEmployees,
         objective,
         110,
         lockedEmployees
@@ -191,15 +199,9 @@ export class SimulationStoreService {
             const result = event.data as AllocationResult;
 
             const allocatedIds = {
-              A: Object.keys(result.department['A'].employeeContributions || []).filter(
-                (_, idx) => idx < result.allocation['A']
-              ),
-              B: Object.keys(result.department['B'].employeeContributions || []).filter(
-                (_, idx) => idx < result.allocation['B']
-              ),
-              C: Object.keys(result.department['C'].employeeContributions || []).filter(
-                (_, idx) => idx < result.allocation['C']
-              ),
+              A: result.department['A'].allocatedEmployeeIds || [],
+              B: result.department['B'].allocatedEmployeeIds || [],
+              C: result.department['C'].allocatedEmployeeIds || [],
             };
 
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds);
@@ -231,6 +233,7 @@ export class SimulationStoreService {
           employees,
           objective,
           totalEmployees,
+          lockedEmployees,
         });
       } else {
         // Fallback to main thread calculation
@@ -360,7 +363,10 @@ export class SimulationStoreService {
       locked[employeeId] = department;
     }
     this.lockedEmployees.set(locked);
-    this.triggerRecalculation();
+
+    // Trigger recalculation with locked employees via employees$ trigger
+    const employees = this.employees$.value;
+    this.employees$.next([...employees]);
   }
 
   getState() {
