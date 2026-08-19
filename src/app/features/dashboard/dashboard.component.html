@@ -70,22 +70,19 @@
             </div>
             <div class="kpi-value">
               @if (simulationResult()) {
-                {{ simulationResult()!.summary.totalRevenue | number: '1.1-1' }}
+                {{ simulationResult()!.summary.totalRevenue | number: '1.2-2' }}
               } @else {
                 —
               }
               <span class="kpi-unit">億円</span>
             </div>
             @if (is110Mode() && kpiDifferences()) {
-              <mat-chip-set aria-label="差分表示">
-                <mat-chip highlighted [highlighted]="kpiDifferences()!.revenueDiff >= 0" class="diff-chip">
-                  @if (kpiDifferences()!.revenueDiff >= 0) {
-                    + {{ kpiDifferences()!.revenueDiff | number: '1.1-1' }}
-                  } @else {
-                    {{ kpiDifferences()!.revenueDiff | number: '1.1-1' }}
-                  }
+              <div class="diff-indicator">
+                <mat-chip [class]="'diff-chip ' + (kpiDifferences()!.revenueDiff >= 0 ? 'positive' : 'negative')">
+                  <span class="delta-symbol">Δ</span>
+                  {{ kpiDifferences()!.revenueDiff >= 0 ? '+' : '' }}{{ kpiDifferences()!.revenueDiff | number: '1.2-2' }}
                 </mat-chip>
-              </mat-chip-set>
+              </div>
             }
           </mat-card-content>
         </mat-card>
@@ -95,22 +92,19 @@
             <div class="kpi-label">全社コスト</div>
             <div class="kpi-value">
               @if (simulationResult()) {
-                {{ simulationResult()!.summary.totalCost | number: '1.1-1' }}
+                {{ simulationResult()!.summary.totalCost | number: '1.2-2' }}
               } @else {
                 —
               }
               <span class="kpi-unit">億円</span>
             </div>
             @if (is110Mode() && kpiDifferences()) {
-              <mat-chip-set aria-label="差分表示">
-                <mat-chip highlighted [highlighted]="kpiDifferences()!.costDiff <= 0" class="diff-chip">
-                  @if (kpiDifferences()!.costDiff >= 0) {
-                    + {{ kpiDifferences()!.costDiff | number: '1.1-1' }}
-                  } @else {
-                    {{ kpiDifferences()!.costDiff | number: '1.1-1' }}
-                  }
+              <div class="diff-indicator">
+                <mat-chip [class]="'diff-chip ' + (kpiDifferences()!.costDiff <= 0 ? 'positive' : 'negative')">
+                  <span class="delta-symbol">Δ</span>
+                  {{ kpiDifferences()!.costDiff >= 0 ? '+' : '' }}{{ kpiDifferences()!.costDiff | number: '1.2-2' }}
                 </mat-chip>
-              </mat-chip-set>
+              </div>
             }
           </mat-card-content>
         </mat-card>
@@ -120,22 +114,19 @@
             <div class="kpi-label">全社利益</div>
             <div class="kpi-value">
               @if (simulationResult()) {
-                {{ simulationResult()!.summary.totalProfit | number: '1.1-1' }}
+                {{ simulationResult()!.summary.totalProfit | number: '1.2-2' }}
               } @else {
                 —
               }
               <span class="kpi-unit">億円</span>
             </div>
             @if (is110Mode() && kpiDifferences()) {
-              <mat-chip-set aria-label="差分表示">
-                <mat-chip highlighted [highlighted]="kpiDifferences()!.profitDiff >= 0" class="diff-chip">
-                  @if (kpiDifferences()!.profitDiff >= 0) {
-                    + {{ kpiDifferences()!.profitDiff | number: '1.1-1' }}
-                  } @else {
-                    {{ kpiDifferences()!.profitDiff | number: '1.1-1' }}
-                  }
+              <div class="diff-indicator">
+                <mat-chip [class]="'diff-chip ' + (kpiDifferences()!.profitDiff >= 0 ? 'positive' : 'negative')">
+                  <span class="delta-symbol">Δ</span>
+                  {{ kpiDifferences()!.profitDiff >= 0 ? '+' : '' }}{{ kpiDifferences()!.profitDiff | number: '1.2-2' }}
                 </mat-chip>
-              </mat-chip-set>
+              </div>
             }
           </mat-card-content>
         </mat-card>
@@ -197,6 +188,11 @@
                   <div class="info-row">
                     <span>配置人数:</span>
                     <strong>{{ deptResult.allocatedEmployees }}</strong>
+                    @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'allocatedDiff') !== 0) {
+                      <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'allocatedDiff') > 0 ? 'positive' : 'negative')">
+                        {{ getDeptDifference(dept.id, 'allocatedDiff') > 0 ? '+' : '' }}{{ getDeptDifference(dept.id, 'allocatedDiff') }}
+                      </mat-chip>
+                    }
                   </div>
                   <div class="info-row">
                     <span>能力値:</span>
@@ -204,7 +200,7 @@
                   </div>
                   <div class="info-row">
                     <span>基本売上:</span>
-                    <strong>{{ deptResult.baseRevenue | number: '1.1-1' }}</strong>
+                    <strong>{{ deptResult.baseRevenue | number: '1.2-2' }}</strong>
                   </div>
                   <div class="info-row">
                     <span>充足率:</span>
@@ -212,15 +208,25 @@
                   </div>
                   <div class="info-row">
                     <span>最終売上:</span>
-                    <strong>{{ deptResult.finalRevenue | number: '1.1-1' }}</strong>
+                    <strong>{{ deptResult.finalRevenue | number: '1.2-2' }}</strong>
+                    @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'revenueDiff') !== 0) {
+                      <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'revenueDiff') > 0 ? 'positive' : 'negative')">
+                        Δ{{ getDeptDifference(dept.id, 'revenueDiff') > 0 ? '+' : '' }}{{ (getDeptDifference(dept.id, 'revenueDiff') | number: '1.2-2') }}
+                      </mat-chip>
+                    }
                   </div>
                   <div class="info-row">
                     <span>コスト:</span>
-                    <strong>{{ deptResult.cost | number: '1.1-1' }}</strong>
+                    <strong>{{ deptResult.cost | number: '1.2-2' }}</strong>
                   </div>
                   <div class="info-row">
                     <span>利益:</span>
-                    <strong>{{ deptResult.profit | number: '1.1-1' }}</strong>
+                    <strong>{{ deptResult.profit | number: '1.2-2' }}</strong>
+                    @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'profitDiff') !== 0) {
+                      <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'profitDiff') > 0 ? 'positive' : 'negative')">
+                        Δ{{ getDeptDifference(dept.id, 'profitDiff') > 0 ? '+' : '' }}{{ (getDeptDifference(dept.id, 'profitDiff') | number: '1.2-2') }}
+                      </mat-chip>
+                    }
                   </div>
                 </div>
 

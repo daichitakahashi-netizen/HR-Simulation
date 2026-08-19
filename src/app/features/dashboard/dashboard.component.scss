@@ -173,12 +173,30 @@
       justify-content: center;
     }
 
+    .diff-indicator {
+      display: flex;
+      justify-content: center;
+      margin-top: 0.2rem;
+    }
+
     .diff-chip {
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       height: auto;
-      padding: 0.25rem 0.5rem;
-      background-color: #4caf50 !important;
+      padding: 0.2rem 0.4rem;
       color: #fff !important;
+      font-weight: 500;
+
+      &.positive {
+        background-color: #4caf50 !important;
+      }
+
+      &.negative {
+        background-color: #f44336 !important;
+      }
+
+      .delta-symbol {
+        margin-right: 0.2rem;
+      }
     }
   }
 
@@ -308,6 +326,7 @@
     font-size: 0.75rem;
     padding: 0.2rem 0;
     border-bottom: 1px solid #f0f0f0;
+    gap: 0.3rem;
 
     span {
       color: #666;
@@ -316,6 +335,26 @@
     strong {
       color: #1976d2;
       font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    mat-chip {
+      &.mini-diff-chip {
+        font-size: 0.65rem;
+        height: auto;
+        padding: 0.15rem 0.3rem;
+        color: #fff !important;
+        font-weight: 500;
+        flex-shrink: 0;
+
+        &.positive {
+          background-color: #4caf50 !important;
+        }
+
+        &.negative {
+          background-color: #f44336 !important;
+        }
+      }
     }
   }
 

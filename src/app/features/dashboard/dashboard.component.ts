@@ -10,6 +10,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatBadgeModule } from '@angular/material/badge';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ChartConfiguration } from 'chart.js';
 import { BaseChartDirective } from 'ng2-charts';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
@@ -30,6 +31,7 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
     MatButtonModule,
     MatDialogModule,
     MatBadgeModule,
+    MatSnackBarModule,
     BaseChartDirective,
   ],
   templateUrl: './dashboard.component.html',
@@ -38,6 +40,7 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
 export class DashboardComponent implements OnInit {
   private store = inject(SimulationStoreService);
   private dialog = inject(MatDialog);
+  private snackBar = inject(MatSnackBar);
 
   readonly isLoading = this.store.isLoading;
   readonly simulationResult = this.store.simulationResult;
@@ -185,10 +188,46 @@ export class DashboardComponent implements OnInit {
       return null;
     }
 
+    const revenueDiff = current.summary.totalRevenue - baseline.summary.totalRevenue;
+    const costDiff = current.summary.totalCost - baseline.summary.totalCost;
+    const profitDiff = current.summary.totalProfit - baseline.summary.totalProfit;
+
     return {
-      revenueDiff: current.summary.totalRevenue - baseline.summary.totalRevenue,
-      costDiff: current.summary.totalCost - baseline.summary.totalCost,
-      profitDiff: current.summary.totalProfit - baseline.summary.totalProfit,
+      revenueDiff,
+      costDiff,
+      profitDiff,
+      revenueSign: revenueDiff >= 0 ? '+' : '',
+      costSign: costDiff >= 0 ? '+' : '',
+      profitSign: profitDiff >= 0 ? '+' : '',
+    };
+  });
+
+  // Department differences for detailed comparison
+  deptDifferences = computed(() => {
+    const current = this.simulationResult();
+    const baseline = this.baselineResult();
+    const is110 = this.is110Mode();
+
+    if (!current || !baseline || !is110) {
+      return null;
+    }
+
+    return {
+      A: {
+        allocatedDiff: current.department['A'].allocatedEmployees - baseline.department['A'].allocatedEmployees,
+        revenueDiff: current.department['A'].finalRevenue - baseline.department['A'].finalRevenue,
+        profitDiff: current.department['A'].profit - baseline.department['A'].profit,
+      },
+      B: {
+        allocatedDiff: current.department['B'].allocatedEmployees - baseline.department['B'].allocatedEmployees,
+        revenueDiff: current.department['B'].finalRevenue - baseline.department['B'].finalRevenue,
+        profitDiff: current.department['B'].profit - baseline.department['B'].profit,
+      },
+      C: {
+        allocatedDiff: current.department['C'].allocatedEmployees - baseline.department['C'].allocatedEmployees,
+        revenueDiff: current.department['C'].finalRevenue - baseline.department['C'].finalRevenue,
+        profitDiff: current.department['C'].profit - baseline.department['C'].profit,
+      },
     };
   });
 
@@ -233,5 +272,15 @@ export class DashboardComponent implements OnInit {
     deptId: string
   ) {
     return result?.department[deptId];
+  }
+
+  getDeptDifference(deptId: string, metric: 'allocatedDiff' | 'revenueDiff' | 'profitDiff'): number {
+    const diffs = this.deptDifferences();
+    if (!diffs) return 0;
+
+    const deptDiff = diffs[deptId as keyof typeof diffs];
+    if (!deptDiff) return 0;
+
+    return deptDiff[metric];
   }
 }

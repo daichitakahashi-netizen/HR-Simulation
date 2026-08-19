@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable } from 'rxjs';
-import { tap, switchMap } from 'rxjs/operators';
+import { tap, switchMap, concatMap, map } from 'rxjs/operators';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
@@ -85,7 +85,7 @@ export class SimulationStoreService {
           this.selectedObjective.set(objective);
 
           if (employees.length === 0) {
-            console.log('[Store] No employees, skipping simulation');
+            console.log('[Store] No employees, skipping simulation (initial state guard)');
             this.isLoading.set(false);
             return of(null);
           }
@@ -105,9 +105,6 @@ export class SimulationStoreService {
             this.simulationResult.set(displayResult);
             this.baselineResult.set(result100);
             this.allocation.set(displayResult.allocation);
-          } else {
-            console.warn('[Store] Simulation returned null results');
-            this.snackBar.open('シミュレーション計算に失敗しました', '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
           }
           this.isLoading.set(false);
         })
@@ -138,88 +135,40 @@ export class SimulationStoreService {
     objective: DepartmentObjective,
     lockedEmployees: Record<string, string>
   ): Observable<{ result100: AllocationResult; result110: AllocationResult } | null> {
-    return new Observable((observer) => {
-      let result100: AllocationResult | null = null;
-      let result110: AllocationResult | null = null;
-      let completed100 = false;
-      let completed110 = false;
-      let hasError = false;
+    console.log('[Store] Starting dual simulation: running 100-employee first, then 110-employee sequentially');
 
-      const checkCompletion = () => {
-        if (completed100 && completed110) {
-          console.log('[Store] Both simulations completed. Checking results...');
-          if (hasError && (!result100 || !result110)) {
-            console.error('[Store] One or both simulations failed');
-            observer.next(null);
-            observer.complete();
-            return;
-          }
-
-          if (result100 && result110) {
-            console.log('[Store] Both results received successfully. Emitting combined results.');
-            observer.next({ result100, result110 });
-            observer.complete();
-          } else if (!result100 || !result110) {
-            console.warn('[Store] One simulation returned null (100=' + (result100 ? 'OK' : 'null') + ', 110=' + (result110 ? 'OK' : 'null') + ')');
-            observer.next(null);
-            observer.complete();
-          }
+    return this.runSimulationWithHybridEngine(
+      employees,
+      objective,
+      100,
+      lockedEmployees
+    ).pipe(
+      concatMap((result100) => {
+        if (!result100) {
+          console.error('[Store] 100-employee simulation failed');
+          return of(null);
         }
-      };
 
-      // Run 100-employee simulation
-      console.log('[Store] Starting 100-employee simulation');
-      this.runSimulationWithHybridEngine(
-        employees,
-        objective,
-        100,
-        lockedEmployees
-      ).subscribe({
-        next: (result) => {
-          console.log('[Store] 100-employee simulation resolved:', result ? 'with result' : 'null');
-          if (result) {
-            result100 = result;
-          } else {
-            hasError = true;
-          }
-          completed100 = true;
-          checkCompletion();
-        },
-        error: (error) => {
-          console.error('[Store] 100-employee simulation error:', error);
-          hasError = true;
-          completed100 = true;
-          checkCompletion();
-        },
-      });
+        console.log('[Store] 100-employee simulation completed successfully. Starting 110-employee simulation...');
+        const extendedEmployees = this.addMockEmployees(employees, 10);
 
-      // Run 110-employee simulation with mock employees added
-      console.log('[Store] Starting 110-employee simulation');
-      const extendedEmployees = this.addMockEmployees(employees, 10);
-      this.runSimulationWithHybridEngine(
-        extendedEmployees,
-        objective,
-        110,
-        lockedEmployees
-      ).subscribe({
-        next: (result) => {
-          console.log('[Store] 110-employee simulation resolved:', result ? 'with result' : 'null');
-          if (result) {
-            result110 = result;
-          } else {
-            hasError = true;
-          }
-          completed110 = true;
-          checkCompletion();
-        },
-        error: (error) => {
-          console.error('[Store] 110-employee simulation error:', error);
-          hasError = true;
-          completed110 = true;
-          checkCompletion();
-        },
-      });
-    });
+        return this.runSimulationWithHybridEngine(
+          extendedEmployees,
+          objective,
+          110,
+          lockedEmployees
+        ).pipe(
+          map((result110) => {
+            if (!result110) {
+              console.error('[Store] 110-employee simulation failed');
+              return null;
+            }
+            console.log('[Store] Both simulations completed successfully.');
+            return { result100, result110 };
+          })
+        );
+      })
+    );
   }
 
   private runSimulationWithHybridEngine(

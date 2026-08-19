@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit, signal, computed } from '@angular/core';
+import { Component, Inject, OnInit, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatTableModule } from '@angular/material/table';
@@ -8,6 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { Employee } from '../../../core/models/simulation.model';
 import { SimulationStoreService } from '../../../core/services/simulation-store.service';
 
@@ -30,6 +31,7 @@ export interface MemberDialogData {
     MatSlideToggleModule,
     MatButtonModule,
     MatProgressSpinnerModule,
+    MatSnackBarModule,
   ],
   templateUrl: './member-dialog.component.html',
   styleUrl: './member-dialog.component.scss',
@@ -48,6 +50,7 @@ export class MemberDialogComponent implements OnInit {
   readonly filterText = signal<string>('');
   readonly sortState = signal<Sort>({ active: '', direction: '' });
   readonly lockedMembers = signal<Set<string>>(new Set());
+  private snackBar = inject(MatSnackBar);
 
   constructor(
     public dialogRef: MatDialogRef<MemberDialogComponent>,
@@ -142,10 +145,44 @@ export class MemberDialogComponent implements OnInit {
       newLocked[empId] = this.data.departmentId;
     });
 
+    // Validate lock constraint
+    const totalEmployees = this.store.employees().length;
+    const minHeadcounts: Record<string, number> = {
+      A: Math.ceil(30 * (totalEmployees / 100)),
+      B: Math.ceil(20 * (totalEmployees / 100)),
+      C: Math.ceil(10 * (totalEmployees / 100)),
+    };
+
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
+    for (const dept of Object.values(newLocked)) {
+      if (lockedCounts[dept] !== undefined) {
+        lockedCounts[dept]++;
+      }
+    }
+
+    // Check if locked counts exceed maximum allowed
+    for (const dept of ['A', 'B', 'C']) {
+      const otherMinsSum = Object.keys(minHeadcounts)
+        .filter(d => d !== dept)
+        .reduce((sum, d) => sum + minHeadcounts[d], 0);
+
+      if (lockedCounts[dept] > totalEmployees - otherMinsSum) {
+        const maxAllowed = totalEmployees - otherMinsSum;
+        this.snackBar.open(
+          `事業部${dept}にはこれ以上ロック設定できません（最大${maxAllowed}名）`,
+          '閉じる',
+          { duration: 5000, panelClass: ['error-snackbar'] }
+        );
+        return;
+      }
+    }
+
     // Update store with new locks and trigger recalculation
     this.store.lockedEmployees.set(newLocked);
     const employees = this.store.employees$.value;
     this.store.employees$.next([...employees]);
+
+    this.snackBar.open('ロック設定を更新しました', '✓', { duration: 3000 });
 
     // Close dialog after recalculation
     this.dialogRef.close();

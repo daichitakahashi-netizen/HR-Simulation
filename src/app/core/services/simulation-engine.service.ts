@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import munkres from 'munkres-js';
 import {
   Employee,
   Department,
@@ -317,6 +318,289 @@ export class SimulationEngineService {
     return result;
   }
 
+  runOptimalSimulation(
+    employees: Employee[],
+    objective: DepartmentObjective,
+    totalEmployees: number,
+    lockedEmployees?: Record<string, string>
+  ): AllocationResult {
+    const patterns = this.generateValidAllocationPatterns(totalEmployees);
+    const contributions = this.precomputeContributions(employees);
 
+    let bestResult: AllocationResult | null = null;
+    let bestScore = -Infinity;
+
+    for (const pattern of patterns) {
+      if (!this.validateLockedEmployees(pattern, lockedEmployees)) {
+        continue;
+      }
+
+      const { matrix, deptMapping } = this.buildCostMatrix(
+        employees,
+        pattern,
+        contributions,
+        lockedEmployees
+      );
+
+      const allocation = this.solveHungarianAndGetAllocation(employees, matrix, deptMapping);
+      const result = this.simulateAllocationIds(employees, allocation, totalEmployees);
+      const score = this.calculateObjectiveScore(result, objective);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestResult = result;
+      } else if (Math.abs(score - bestScore) < 1e-8 && bestResult) {
+        const currentA = result.department['A'].finalRevenue;
+        const bestA = bestResult.department['A'].finalRevenue;
+        if (currentA > bestA) {
+          bestScore = score;
+          bestResult = result;
+        }
+      }
+    }
+
+    return bestResult || this.generateDefaultResult(totalEmployees);
+  }
+
+  private precomputeContributions(employees: Employee[]): Record<string, number[]> {
+    const contributions: Record<string, number[]> = { A: [], B: [], C: [] };
+    for (const dept of ['A', 'B', 'C']) {
+      contributions[dept] = employees.map((emp) =>
+        this.calculateEmployeeContribution(emp, dept)
+      );
+    }
+    return contributions;
+  }
+
+  private generateValidAllocationPatterns(
+    totalEmployees: number
+  ): Array<{ A: number; B: number; C: number }> {
+    const minHeadcounts = {
+      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployees / 100)),
+      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployees / 100)),
+      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployees / 100)),
+    };
+
+    const patterns: Array<{ A: number; B: number; C: number }> = [];
+    for (let a = minHeadcounts.A; a <= totalEmployees - minHeadcounts.B - minHeadcounts.C; a++) {
+      for (let b = minHeadcounts.B; b <= totalEmployees - a - minHeadcounts.C; b++) {
+        const c = totalEmployees - a - b;
+        if (c >= minHeadcounts.C) {
+          patterns.push({ A: a, B: b, C: c });
+        }
+      }
+    }
+    return patterns;
+  }
+
+  private buildCostMatrix(
+    employees: Employee[],
+    pattern: { A: number; B: number; C: number },
+    contributions: Record<string, number[]>,
+    lockedEmployees?: Record<string, string>
+  ): { matrix: number[][]; deptMapping: string[] } {
+    const n = employees.length;
+    const deptMapping: string[] = [];
+    const matrix: number[][] = [];
+
+    const slots: Array<{ dept: string; count: number }> = [
+      { dept: 'A', count: pattern.A },
+      { dept: 'B', count: pattern.B },
+      { dept: 'C', count: pattern.C },
+    ];
+
+    for (const slot of slots) {
+      for (let i = 0; i < slot.count; i++) {
+        deptMapping.push(slot.dept);
+      }
+    }
+
+    for (let empIdx = 0; empIdx < n; empIdx++) {
+      const row: number[] = [];
+      const emp = employees[empIdx];
+      const lockedDept = lockedEmployees?.[emp.id];
+
+      for (let slotIdx = 0; slotIdx < deptMapping.length; slotIdx++) {
+        const dept = deptMapping[slotIdx];
+        const contribution = contributions[dept][empIdx];
+
+        if (lockedDept && lockedDept !== dept) {
+          row.push(1000000);
+        } else {
+          row.push(-contribution);
+        }
+      }
+      matrix.push(row);
+    }
+
+    return { matrix, deptMapping };
+  }
+
+  private solveHungarianAndGetAllocation(
+    employees: Employee[],
+    matrix: number[][],
+    deptMapping: string[]
+  ): Record<string, string[]> {
+    const assignment = munkres(matrix);
+
+    const allocation: Record<string, string[]> = { A: [], B: [], C: [] };
+    for (const [empIdx, slotIdx] of assignment) {
+      const dept = deptMapping[slotIdx];
+      allocation[dept].push(employees[empIdx].id);
+    }
+
+    return allocation;
+  }
+
+  private validateLockedEmployees(
+    pattern: { A: number; B: number; C: number },
+    lockedEmployees?: Record<string, string>
+  ): boolean {
+    if (!lockedEmployees) return true;
+
+    const lockedCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
+    for (const dept of Object.values(lockedEmployees)) {
+      lockedCounts[dept]++;
+    }
+
+    for (const dept of ['A', 'B', 'C']) {
+      if (lockedCounts[dept] > pattern[dept as keyof typeof pattern]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private simulateAllocationIds(
+    employees: Employee[],
+    allocatedIds: Record<string, string[]>,
+    totalEmployees: number
+  ): AllocationResult {
+    const result: AllocationResult = {
+      allocation: {
+        A: allocatedIds['A'].length,
+        B: allocatedIds['B'].length,
+        C: allocatedIds['C'].length,
+      },
+      department: {},
+      summary: {
+        totalRevenue: 0,
+        totalCost: 0,
+        totalProfit: 0,
+        isBelowPreviousYearRevenue: false,
+      },
+    };
+
+    let totalRevenue = 0;
+    let totalCost = 0;
+    let totalProfit = 0;
+
+    for (const dept of ['A', 'B', 'C']) {
+      const deptEmployeeIds = allocatedIds[dept] || [];
+      const deptEmployees = employees.filter((emp) =>
+        deptEmployeeIds.includes(emp.id)
+      );
+      const allocatedCount = deptEmployees.length;
+
+      const deptResult = this.calculateDepartmentResult(
+        deptEmployees,
+        allocatedCount,
+        dept,
+        totalEmployees
+      );
+
+      result.department[dept] = deptResult;
+      totalRevenue += deptResult.finalRevenue;
+      totalCost += deptResult.cost;
+      totalProfit += deptResult.profit;
+    }
+
+    result.summary = {
+      totalRevenue,
+      totalCost,
+      totalProfit,
+      isBelowPreviousYearRevenue: totalRevenue < 58,
+    };
+
+    return result;
+  }
+
+  private calculateObjectiveScore(result: AllocationResult, objective: DepartmentObjective): number {
+    if (objective === 'totalRevenue') {
+      return result.summary.totalRevenue;
+    } else if (objective === 'departmentAProfitMaximize') {
+      return result.department['A'].profit;
+    } else if (objective === 'departmentBRevenueMaximize') {
+      return result.department['B'].finalRevenue;
+    } else if (objective === 'departmentCRevenueMaximize') {
+      return result.department['C'].finalRevenue;
+    }
+    return result.summary.totalRevenue;
+  }
+
+  private generateDefaultResult(totalEmployees: number): AllocationResult {
+    const minHeadcounts = {
+      A: Math.ceil(this.departmentConfigs['A'].minHeadcount * (totalEmployees / 100)),
+      B: Math.ceil(this.departmentConfigs['B'].minHeadcount * (totalEmployees / 100)),
+      C: Math.ceil(this.departmentConfigs['C'].minHeadcount * (totalEmployees / 100)),
+    };
+
+    return {
+      allocation: minHeadcounts,
+      department: {
+        A: {
+          allocatedEmployees: 0,
+          employeeContributions: [],
+          departmentCapability: 0,
+          baseRevenue: 0,
+          fulfillmentRate: 0,
+          appropriateHeadcount: 0,
+          shortageCoefficient: 0.3,
+          surplusCoefficient: 1.0,
+          finalRevenue: 0,
+          cost: 0,
+          profit: 0,
+          personnelCosts: [],
+          allocatedEmployeeIds: [],
+        },
+        B: {
+          allocatedEmployees: 0,
+          employeeContributions: [],
+          departmentCapability: 0,
+          baseRevenue: 0,
+          fulfillmentRate: 0,
+          appropriateHeadcount: 0,
+          shortageCoefficient: 0.5,
+          surplusCoefficient: 1.0,
+          finalRevenue: 0,
+          cost: 0,
+          profit: 0,
+          personnelCosts: [],
+          allocatedEmployeeIds: [],
+        },
+        C: {
+          allocatedEmployees: 0,
+          employeeContributions: [],
+          departmentCapability: 0,
+          baseRevenue: 0,
+          fulfillmentRate: 0,
+          appropriateHeadcount: 0,
+          shortageCoefficient: 0.7,
+          surplusCoefficient: 1.0,
+          finalRevenue: 0,
+          cost: 0,
+          profit: 0,
+          personnelCosts: [],
+          allocatedEmployeeIds: [],
+        },
+      },
+      summary: {
+        totalRevenue: 0,
+        totalCost: 0,
+        totalProfit: 0,
+        isBelowPreviousYearRevenue: true,
+      },
+    };
+  }
 
 }
