@@ -250,6 +250,7 @@ export class SimulationStoreService {
       if (!this.simulationWorker) {
         console.error('[Store] Web Worker not available and no fallback calculation available');
         this.snackBar.open('Web Workerが利用できません', '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
+        this.isLoading.set(false);
         observer.next(null);
         observer.complete();
         return;
@@ -276,6 +277,7 @@ export class SimulationStoreService {
           if (type === 'ERROR') {
             console.error('[Store] Worker reported error:', error, stack);
             this.snackBar.open(`計算エラー: ${error}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
+            this.isLoading.set(false);
             cleanup();
             observer.next(null);
             observer.complete();
@@ -303,6 +305,8 @@ export class SimulationStoreService {
             this.allocatedEmployeeIds.set(allocatedIds);
 
             cleanup();
+            this.isLoading.set(false);
+            this.hasCalculatedResults = true;
             console.log('[Store] Emitting result via observer.next()');
             observer.next(result);
             observer.complete();
@@ -330,12 +334,15 @@ export class SimulationStoreService {
             this.allocatedEmployeeIds.set(allocatedIds);
 
             cleanup();
+            this.isLoading.set(false);
+            this.hasCalculatedResults = true;
             console.log('[Store] Emitting result via observer.next()');
             observer.next(result);
             observer.complete();
           }
         } catch (error) {
           console.error('[Store] Error processing worker message:', error);
+          this.isLoading.set(false);
           if (handleError) {
             handleError(error as any);
           }
@@ -346,6 +353,7 @@ export class SimulationStoreService {
         console.error('[Store] Worker error event:', error);
         const errorMsg = error instanceof ErrorEvent ? error.message : (error?.message || 'Unknown worker error');
         this.snackBar.open(`Workerエラー: ${errorMsg}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
+        this.isLoading.set(false);
         cleanup();
         observer.next(null);
         observer.complete();
@@ -371,7 +379,9 @@ export class SimulationStoreService {
 
   runSimulation(): void {
     console.log('[Store] Manual recalculation initiated');
+    this.isLoading.set(true);
     this.isManualRecalculation = true;
+    this.hasCalculatedResults = false;
     this.triggerRecalculation();
   }
 

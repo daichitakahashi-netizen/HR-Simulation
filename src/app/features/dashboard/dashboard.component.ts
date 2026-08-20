@@ -15,7 +15,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { ChartConfiguration } from 'chart.js';
 import { BaseChartDirective } from 'ng2-charts';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
-import { ScenarioRepositoryService } from '../../core/services/scenario-repository.service';
+import { FirestoreService } from '../../core/services/firestore.service';
 import { AllocationResult } from '../../core/models/simulation.model';
 import { MemberDialogComponent } from './member-dialog/member-dialog.component';
 
@@ -44,7 +44,7 @@ export class DashboardComponent implements OnInit {
   private store = inject(SimulationStoreService);
   private dialog = inject(MatDialog);
   private snackBar = inject(MatSnackBar);
-  private scenarioRepository = inject(ScenarioRepositoryService);
+  private firestoreService = inject(FirestoreService);
   readonly Object = Object;
 
   readonly isLoading = this.store.isLoading;
@@ -313,6 +313,16 @@ export class DashboardComponent implements OnInit {
     return value !== null && value !== undefined && !isNaN(value);
   }
 
+  private objectiveToJapaneseName(objective: string): string {
+    const mapping: Record<string, string> = {
+      'totalRevenue': '全社売上最大化',
+      'departmentAProfitMaximize': 'A事業部利益最大化',
+      'departmentBRevenueMaximize': 'B事業部売上最大化',
+      'departmentCRevenueMaximize': 'C事業部売上最大化',
+    };
+    return mapping[objective] || objective;
+  }
+
   async openSaveScenarioDialog(): Promise<void> {
     const { SaveScenarioDialogComponent } = await import('./save-scenario-dialog/save-scenario-dialog.component');
     const dialogRef = this.dialog.open(SaveScenarioDialogComponent);
@@ -329,9 +339,12 @@ export class DashboardComponent implements OnInit {
         return;
       }
 
+      const objective = this.selectedObjective();
+      const finalName = scenarioName.trim() || this.objectiveToJapaneseName(objective);
+
       const scenario = {
-        name: scenarioName,
-        objective: this.selectedObjective(),
+        name: finalName,
+        objective: objective,
         totalRevenue: result.summary.totalRevenue,
         totalCost: result.summary.totalCost,
         totalProfit: result.summary.totalProfit,
@@ -367,8 +380,8 @@ export class DashboardComponent implements OnInit {
         employeeCount: this.employeeCount(),
       };
 
-      await this.scenarioRepository.saveScenario(scenario);
-      this.snackBar.open(`シナリオ「${scenarioName}」を保存しました`, 'OK', { duration: 3000 });
+      await this.firestoreService.saveScenarioSummary(scenario);
+      this.snackBar.open(`シナリオ「${finalName}」を保存しました`, 'OK', { duration: 3000 });
     } catch (error) {
       console.error('Error saving scenario:', error);
       this.snackBar.open('シナリオの保存に失敗しました', 'OK', { duration: 3000 });
