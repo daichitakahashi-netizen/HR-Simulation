@@ -9,6 +9,7 @@ interface WorkerMessage {
   objective: DepartmentObjective;
   totalEmployees: number;
   lockedEmployees?: Record<string, string>;
+  requestId: number;
 }
 
 interface AllocationPattern {
@@ -385,6 +386,7 @@ addEventListener('message', ({ data }: MessageEvent<WorkerMessage>) => {
     postMessage({
       type: 'SUCCESS',
       data: result,
+      requestId: data.requestId,
     });
   } catch (error) {
     console.error('[Worker] Error during simulation:', error);
@@ -392,6 +394,7 @@ addEventListener('message', ({ data }: MessageEvent<WorkerMessage>) => {
       type: 'ERROR',
       error: error instanceof Error ? error.message : 'Unknown error occurred',
       stack: error instanceof Error ? error.stack : '',
+      requestId: data.requestId,
     });
   }
 });

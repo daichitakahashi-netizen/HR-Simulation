@@ -48,6 +48,7 @@ export class SimulationStoreService {
   private isManualRecalculation = false;
   private csvDataCached = false;
   private simulationCache = new Map<string, { result100: AllocationResult; result110: AllocationResult | null }>();
+  private currentRequestId: number = 0;
 
   constructor(
     private httpClient: HttpClient,
@@ -167,10 +168,6 @@ export class SimulationStoreService {
               this.allocation.set(displayResult.allocation);
             }
           }
-        }),
-        finalize(() => {
-          console.log('[Store] Finalizing simulation pipeline (resetting isLoading)');
-          this.isLoading.set(false);
         })
       )
       .subscribe();
@@ -218,20 +215,26 @@ export class SimulationStoreService {
     lockedEmployees: Record<string, string>
   ): Observable<{ result100: AllocationResult; result110: AllocationResult | null } | null> {
     const cacheKey = this.generateCacheKey(objective, lockedEmployees);
+    const requestId = ++this.currentRequestId;
 
     if (this.simulationCache.has(cacheKey)) {
       console.log('[Store] Cache hit! Restoring results from Map cache (0ms)');
       const cachedResults = this.simulationCache.get(cacheKey)!;
-      return of({ result100: cachedResults.result100, result110: cachedResults.result110 });
+      const results = { result100: cachedResults.result100, result110: cachedResults.result110 };
+
+      this.isLoading.set(false);
+      return of(results);
     }
 
     console.log('[Store] Starting dual simulation: running 100-employee first, then 110-employee sequentially');
+    console.log('[Store] Request ID:', requestId);
 
     return this.runSimulationWithHybridEngine(
       employees,
       objective,
       100,
-      lockedEmployees
+      lockedEmployees,
+      requestId
     ).pipe(
       concatMap((result100) => {
         if (!result100) {
@@ -246,7 +249,8 @@ export class SimulationStoreService {
           extendedEmployees,
           objective,
           110,
-          lockedEmployees
+          lockedEmployees,
+          requestId
         ).pipe(
           map((result110) => {
             if (!result110) {
@@ -260,10 +264,6 @@ export class SimulationStoreService {
             return { result100, result110 };
           })
         );
-      }),
-      finalize(() => {
-        console.log('[Store] Finalizing dual simulation (resetting isLoading)');
-        this.isLoading.set(false);
       })
     );
   }
@@ -272,7 +272,8 @@ export class SimulationStoreService {
     employees: Employee[],
     objective: DepartmentObjective,
     totalEmployees: number,
-    lockedEmployees: Record<string, string>
+    lockedEmployees: Record<string, string>,
+    requestId: number
   ): Observable<AllocationResult | null> {
     return new Observable((observer) => {
       if (!this.simulationWorker) {
@@ -308,6 +309,11 @@ export class SimulationStoreService {
           const { type, data, error, stack } = event.data;
 
           if (type === 'ERROR') {
+            if (event.data.requestId && event.data.requestId !== requestId) {
+              console.log('[Store] Ignoring stale error message. Current requestId:', requestId, 'Received requestId:', event.data.requestId);
+              return;
+            }
+
             console.error('[Store] Worker reported error:', error, stack);
             this.snackBar.open(`計算エラー: ${error}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
             completed = true;
@@ -319,6 +325,11 @@ export class SimulationStoreService {
           }
 
           if (type === 'SUCCESS' && data) {
+            if (event.data.requestId !== requestId) {
+              console.log('[Store] Ignoring stale message. Current requestId:', requestId, 'Received requestId:', event.data.requestId);
+              return;
+            }
+
             console.log('[Store] Processing SUCCESS message from worker');
             const result = data as AllocationResult;
 
@@ -328,6 +339,17 @@ export class SimulationStoreService {
               C: result.department['C'].allocatedEmployeeIds || [],
             };
 
+            this.allocatedEmployeeIds.set(allocatedIds);
+
+            completed = true;
+            this.isLoading.set(false);
+            this.hasCalculatedResults = true;
+            console.log('[Store] Emitting result via observer.next()');
+            observer.next(result);
+            observer.complete();
+
+            cleanup();
+
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
             if (totalEmployees === 100) {
@@ -336,21 +358,18 @@ export class SimulationStoreService {
               this.reasonText110.set(reasoningText);
             }
             this.updateDisplayReasonText();
-            this.allocatedEmployeeIds.set(allocatedIds);
-
-            completed = true;
-            cleanup();
-            this.isLoading.set(false);
-            this.hasCalculatedResults = true;
-            console.log('[Store] Emitting result via observer.next()');
-            observer.next(result);
-            observer.complete();
+            console.log('[Store] Text generation completed');
             return;
           }
 
           // Fallback: treat as AllocationResult if no type field (backward compatibility)
           const result = event.data as AllocationResult;
           if (result.allocation && result.department) {
+            if (event.data.requestId && event.data.requestId !== requestId) {
+              console.log('[Store] Ignoring stale LEGACY message. Current requestId:', requestId, 'Received requestId:', event.data.requestId);
+              return;
+            }
+
             console.log('[Store] Processing LEGACY message format (no type field)');
             const allocatedIds = {
               A: result.department['A'].allocatedEmployeeIds || [],
@@ -358,6 +377,17 @@ export class SimulationStoreService {
               C: result.department['C'].allocatedEmployeeIds || [],
             };
 
+            this.allocatedEmployeeIds.set(allocatedIds);
+
+            completed = true;
+            this.isLoading.set(false);
+            this.hasCalculatedResults = true;
+            console.log('[Store] Emitting result via observer.next()');
+            observer.next(result);
+            observer.complete();
+
+            cleanup();
+
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
             if (totalEmployees === 100) {
@@ -366,22 +396,14 @@ export class SimulationStoreService {
               this.reasonText110.set(reasoningText);
             }
             this.updateDisplayReasonText();
-            this.allocatedEmployeeIds.set(allocatedIds);
-
-            completed = true;
-            cleanup();
-            this.isLoading.set(false);
-            this.hasCalculatedResults = true;
-            console.log('[Store] Emitting result via observer.next()');
-            observer.next(result);
-            observer.complete();
+            console.log('[Store] Text generation completed');
           }
         } catch (error) {
           console.error('[Store] Error processing worker message:', error);
           if (!completed) {
             completed = true;
-            cleanup();
             this.isLoading.set(false);
+            cleanup();
             observer.next(null);
             observer.complete();
           }
@@ -401,7 +423,7 @@ export class SimulationStoreService {
         observer.complete();
       };
 
-      console.log('[Store] Posting message to worker (totalEmployees=' + totalEmployees + ')');
+      console.log('[Store] Posting message to worker (totalEmployees=' + totalEmployees + ', requestId=' + requestId + ')');
       this.simulationWorker.addEventListener('message', handleMessage);
       this.simulationWorker.addEventListener('error', handleError);
 
@@ -410,6 +432,7 @@ export class SimulationStoreService {
         objective,
         totalEmployees,
         lockedEmployees,
+        requestId,
       });
 
       return () => {
