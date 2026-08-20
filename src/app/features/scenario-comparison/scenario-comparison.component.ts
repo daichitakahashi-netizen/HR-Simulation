@@ -144,10 +144,10 @@ export class ScenarioComparisonComponent implements OnInit {
 
   getObjectiveLabel(objective: string): string {
     const labels: Record<string, string> = {
-      total_revenue: '全社売上最大化',
-      a_profit: 'A事業部利益最大化',
-      b_revenue: 'B事業部売上最大化',
-      c_revenue: 'C事業部売上最大化',
+      totalRevenue: '全社売上最大化',
+      departmentAProfitMaximize: 'A事業部利益最大化',
+      departmentBRevenueMaximize: 'B事業部売上最大化',
+      departmentCRevenueMaximize: 'C事業部売上最大化',
     };
     return labels[objective] || objective;
   }

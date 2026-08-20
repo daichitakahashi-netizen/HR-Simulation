@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable } from 'rxjs';
-import { tap, switchMap, concatMap, map } from 'rxjs/operators';
+import { tap, switchMap, concatMap, map, finalize } from 'rxjs/operators';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
@@ -167,6 +167,9 @@ export class SimulationStoreService {
               this.allocation.set(displayResult.allocation);
             }
           }
+        }),
+        finalize(() => {
+          console.log('[Store] Finalizing simulation pipeline (resetting isLoading)');
           this.isLoading.set(false);
         })
       )
@@ -257,6 +260,10 @@ export class SimulationStoreService {
             return { result100, result110 };
           })
         );
+      }),
+      finalize(() => {
+        console.log('[Store] Finalizing dual simulation (resetting isLoading)');
+        this.isLoading.set(false);
       })
     );
   }
