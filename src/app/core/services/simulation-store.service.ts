@@ -1,6 +1,6 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable, forkJoin } from 'rxjs';
 import { tap, switchMap, concatMap, map, finalize } from 'rxjs/operators';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { SimulationEngineService } from './simulation-engine.service';
@@ -125,15 +125,7 @@ export class SimulationStoreService {
             console.log('[Store] Cache exists and nothing changed, skipping auto-calculation');
             this.isLoading.set(false);
             // Display cached results without re-running simulation
-            const result100 = this.simulationResult100$.value;
-            const result110 = this.simulationResult110$.value;
-            if (result100) {
-              const displayResult = this.is110Mode() ? (result110 || result100) : result100;
-              this.simulationResult.set(displayResult);
-              this.baselineResult.set(result100);
-              this.allocation.set(displayResult.allocation);
-            }
-            this.updateDisplayReasonText();
+            this.updateDisplayState();
             return of(null);
           }
 
@@ -160,13 +152,7 @@ export class SimulationStoreService {
             this.simulationResult110$.next(result110);
             this.has110Data.set(result110 !== null);
             this.hasCalculatedResults = true;
-
-            const displayResult = this.is110Mode() ? (result110 || result100) : result100;
-            if (displayResult) {
-              this.simulationResult.set(displayResult);
-              this.baselineResult.set(result100);
-              this.allocation.set(displayResult.allocation);
-            }
+            this.updateDisplayState();
           }
         })
       )
@@ -184,24 +170,13 @@ export class SimulationStoreService {
         const has110Data = result110 !== null;
         this.has110Data.set(has110Data);
 
-        // Failsafe: if 110-mode is requested but data is not available, use 100-mode result
-        let displayResult = result100;
-        if (is110Mode && has110Data) {
-          displayResult = result110;
-        } else if (is110Mode && !has110Data) {
-          // Failsafe warning
-          this.insufficientDataWarning.set('※110名用人事データ（追加10名）が読み込まれていないため、100名でのシミュレーション結果を表示しています');
-          displayResult = result100;
-        } else {
-          this.insufficientDataWarning.set('');
+        // If switching to 110-mode and 110-mode result is not yet available, show loading state
+        if (is110Mode && result110 === null) {
+          console.log('[Store] Switched to 110-mode but calculation not completed, showing loading state');
+          this.isLoading.set(true);
         }
 
-        if (displayResult) {
-          this.simulationResult.set(displayResult);
-          this.allocation.set(displayResult.allocation);
-        }
-
-        this.updateDisplayReasonText();
+        this.updateDisplayState();
       })
     ).subscribe();
 
@@ -226,44 +201,63 @@ export class SimulationStoreService {
       return of(results);
     }
 
-    console.log('[Store] Starting dual simulation: running 100-employee first, then 110-employee sequentially');
+    console.log('[Store] Starting dual simulation: running 100-employee and 110-employee in parallel');
     console.log('[Store] Request ID:', requestId);
 
-    return this.runSimulationWithHybridEngine(
+    const result100$ = this.runSimulationWithHybridEngine(
       employees,
       objective,
       100,
       lockedEmployees,
       requestId
     ).pipe(
-      concatMap((result100) => {
+      tap((result100) => {
+        if (result100) {
+          console.log('[Store] 100-employee simulation completed. Updating display...');
+          this.simulationResult100$.next(result100);
+          this.updateDisplayState();
+        }
+      })
+    );
+
+    let result110$: Observable<AllocationResult | null>;
+    if (employees.length >= 110) {
+      console.log('[Store] 110-employee data available, starting parallel calculation...');
+      const extendedEmployees = this.addMockEmployees(employees, 10);
+
+      result110$ = this.runSimulationWithHybridEngine(
+        extendedEmployees,
+        objective,
+        110,
+        lockedEmployees,
+        requestId
+      ).pipe(
+        tap((result110) => {
+          if (result110) {
+            console.log('[Store] 110-employee simulation completed. Updating display...');
+            this.simulationResult110$.next(result110);
+            this.has110Data.set(true);
+            this.updateDisplayState();
+          }
+        })
+      );
+    } else {
+      console.log('[Store] 110-employee data not available, skipping 110-employee calculation');
+      result110$ = of(null);
+    }
+
+    return forkJoin([result100$, result110$]).pipe(
+      map(([result100, result110]) => {
         if (!result100) {
           console.error('[Store] 100-employee simulation failed');
-          return of(null);
+          return null;
         }
 
-        console.log('[Store] 100-employee simulation completed successfully. Starting 110-employee simulation...');
-        const extendedEmployees = this.addMockEmployees(employees, 10);
+        console.log('[Store] All parallel simulations completed. Caching results...');
+        this.simulationCache.set(cacheKey, { result100, result110 });
+        console.log('[Store] Results cached in Map for future use');
 
-        return this.runSimulationWithHybridEngine(
-          extendedEmployees,
-          objective,
-          110,
-          lockedEmployees,
-          requestId
-        ).pipe(
-          map((result110) => {
-            if (!result110) {
-              console.error('[Store] 110-employee simulation failed, using 100-employee result only');
-              this.simulationCache.set(cacheKey, { result100, result110: null });
-              return { result100, result110: null };
-            }
-            console.log('[Store] Both simulations completed successfully.');
-            this.simulationCache.set(cacheKey, { result100, result110 });
-            console.log('[Store] Results cached in Map for future use');
-            return { result100, result110 };
-          })
-        );
+        return { result100, result110 };
       })
     );
   }
@@ -515,6 +509,53 @@ export class SimulationStoreService {
     this.employees$.next(employees);
   }
 
+  uploadEmployeesCsv(parsedEmployees: Employee[]): void {
+    const count = parsedEmployees.length;
+    const currentEmployees = this.employees$.value;
+
+    if (count === 10 && currentEmployees.length === 100) {
+      const mergedEmployees = this.mergeEmployees(currentEmployees, parsedEmployees);
+      this.employees$.next(mergedEmployees);
+      this.snackBar.open(`社員データを結合しました（100名 + 10名 = 110名）`, '✓', { duration: 5000 });
+      return;
+    }
+
+    if (count === 100 || count === 110) {
+      this.employees$.next(parsedEmployees);
+      this.snackBar.open(`${count}名分の社員データをアップロードしました`, '✓', { duration: 5000 });
+      return;
+    }
+
+    this.snackBar.open('CSVデータは100名、110名、または追加10名分である必要があります', '閉じる', {
+      duration: 5000,
+      panelClass: ['error-snackbar']
+    });
+  }
+
+  private mergeEmployees(existing: Employee[], additional: Employee[]): Employee[] {
+    const usedIds = new Set(existing.map(e => e.id));
+    const adjustedAdditional: Employee[] = [];
+
+    for (const emp of additional) {
+      let newId = emp.id;
+      let counter = 1;
+
+      while (usedIds.has(newId)) {
+        newId = `${emp.id}_${counter}`;
+        counter++;
+      }
+
+      adjustedAdditional.push({
+        ...emp,
+        id: newId,
+      });
+
+      usedIds.add(newId);
+    }
+
+    return [...existing, ...adjustedAdditional];
+  }
+
   updateObjective(objective: DepartmentObjective | string): void {
     const obj = objective as DepartmentObjective;
     this.currentObjective$.next(obj);
@@ -636,6 +677,38 @@ export class SimulationStoreService {
     }
 
     return null;
+  }
+
+  private updateDisplayState(): void {
+    const result100 = this.simulationResult100$.value;
+    const result110 = this.simulationResult110$.value;
+    const is110Mode = this.is110Mode();
+
+    if (is110Mode) {
+      if (result110 !== null) {
+        this.insufficientDataWarning.set('');
+        this.simulationResult.set(result110);
+        this.allocation.set(result110.allocation);
+      } else {
+        this.insufficientDataWarning.set('※110名用人事データ（追加10名）が読み込まれていないため、100名でのシミュレーション結果を表示しています');
+        if (result100) {
+          this.simulationResult.set(result100);
+          this.allocation.set(result100.allocation);
+        }
+      }
+    } else {
+      this.insufficientDataWarning.set('');
+      if (result100) {
+        this.simulationResult.set(result100);
+        this.allocation.set(result100.allocation);
+      }
+    }
+
+    if (result100) {
+      this.baselineResult.set(result100);
+    }
+
+    this.updateDisplayReasonText();
   }
 
   private updateDisplayReasonText(): void {
