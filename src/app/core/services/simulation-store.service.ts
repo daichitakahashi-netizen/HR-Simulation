@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable, forkJoin } from 'rxjs';
-import { tap, switchMap, concatMap, map, finalize } from 'rxjs/operators';
+import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable, forkJoin, Subject, merge } from 'rxjs';
+import { tap, switchMap, concatMap, map, finalize, withLatestFrom } from 'rxjs/operators';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
@@ -49,6 +49,7 @@ export class SimulationStoreService {
   private csvDataCached = false;
   private simulationCache = new Map<string, { result100: AllocationResult; result110: AllocationResult | null }>();
   private currentRequestId: number = 0;
+  private recalculateTrigger$ = new Subject<void>();
 
   constructor(
     private httpClient: HttpClient,
@@ -83,13 +84,18 @@ export class SimulationStoreService {
       this.employees$,
       this.currentObjective$,
       lockedEmployeesTrigger$,
+      merge(of(null), this.recalculateTrigger$),
     ])
       .pipe(
         distinctUntilChanged((prev, curr) => {
-          return JSON.stringify(prev) === JSON.stringify(curr);
+          // Always pass through when recalculate trigger fires
+          if (curr[3] !== undefined && curr[3] !== null) {
+            return false;
+          }
+          return JSON.stringify(prev.slice(0, 3)) === JSON.stringify(curr.slice(0, 3));
         }),
         tap(() => {
-          console.log('[Store] Employees/Objective/Locked changed');
+          console.log('[Store] Employees/Objective/Locked changed or recalculate triggered');
         }),
         switchMap(([employees, objective]) => {
           console.log('[Store] Switch to simulation with', employees.length, 'employees and objective:', objective);
@@ -190,31 +196,41 @@ export class SimulationStoreService {
     lockedEmployees: Record<string, string>
   ): Observable<{ result100: AllocationResult; result110: AllocationResult | null } | null> {
     const cacheKey = this.generateCacheKey(objective, lockedEmployees);
-    const requestId = ++this.currentRequestId;
+    const result100RequestId = ++this.currentRequestId;
+    const result110RequestId = ++this.currentRequestId;
 
     if (this.simulationCache.has(cacheKey)) {
       console.log('[Store] Cache hit! Restoring results from Map cache (0ms)');
       const cachedResults = this.simulationCache.get(cacheKey)!;
       const results = { result100: cachedResults.result100, result110: cachedResults.result110 };
 
-      this.isLoading.set(false);
-      return of(results);
+      return of(results).pipe(
+        finalize(() => {
+          console.log('[Store] Cache hit - setting isLoading to false');
+          this.isLoading.set(false);
+        })
+      );
     }
 
     console.log('[Store] Starting dual simulation: running 100-employee and 110-employee in parallel');
-    console.log('[Store] Request ID:', requestId);
+    console.log('[Store] 100-employee Request ID:', result100RequestId);
+    console.log('[Store] 110-employee Request ID:', result110RequestId);
 
     const result100$ = this.runSimulationWithHybridEngine(
-      employees,
+      employees.slice(0, 100),
       objective,
       100,
       lockedEmployees,
-      requestId
+      result100RequestId
     ).pipe(
       tap((result100) => {
         if (result100) {
-          console.log('[Store] 100-employee simulation completed. Updating display...');
+          console.log('[Store] 100-employee simulation completed.');
           this.simulationResult100$.next(result100);
+          // 100名モードの場合のみローディング解除
+          if (!this.is110Mode()) {
+            this.isLoading.set(false);
+          }
           this.updateDisplayState();
         }
       })
@@ -223,27 +239,38 @@ export class SimulationStoreService {
     let result110$: Observable<AllocationResult | null>;
     if (employees.length >= 110) {
       console.log('[Store] 110-employee data available, starting parallel calculation...');
-      const extendedEmployees = this.addMockEmployees(employees, 10);
 
       result110$ = this.runSimulationWithHybridEngine(
-        extendedEmployees,
+        employees,
         objective,
         110,
         lockedEmployees,
-        requestId
+        result110RequestId
       ).pipe(
         tap((result110) => {
           if (result110) {
-            console.log('[Store] 110-employee simulation completed. Updating display...');
+            console.log('[Store] 110-employee simulation completed.');
             this.simulationResult110$.next(result110);
             this.has110Data.set(true);
+            // 110名モードの場合、ここでローディング解除
+            if (this.is110Mode()) {
+              this.isLoading.set(false);
+            }
             this.updateDisplayState();
           }
         })
       );
     } else {
       console.log('[Store] 110-employee data not available, skipping 110-employee calculation');
-      result110$ = of(null);
+      result110$ = of(null).pipe(
+        tap(() => {
+          console.log('[Store] 110-employee calculation skipped (no data available)');
+          // 110名データがない場合でも、110名モードであればローディング解除
+          if (this.is110Mode()) {
+            this.isLoading.set(false);
+          }
+        })
+      );
     }
 
     return forkJoin([result100$, result110$]).pipe(
@@ -258,6 +285,10 @@ export class SimulationStoreService {
         console.log('[Store] Results cached in Map for future use');
 
         return { result100, result110 };
+      }),
+      finalize(() => {
+        console.log('[Store] Dual simulation finalized - setting isLoading to false');
+        this.isLoading.set(false);
       })
     );
   }
@@ -298,12 +329,12 @@ export class SimulationStoreService {
         if (completed) return;
 
         try {
-          console.log('[Store] Received message from worker:', event.data.type || 'LEGACY');
+          console.log('[Store] Received message from worker:', event.data.type || 'LEGACY', 'requestId:', event.data.requestId, 'expected:', requestId);
 
           const { type, data, error, stack } = event.data;
 
           if (type === 'ERROR') {
-            if (event.data.requestId && event.data.requestId !== requestId) {
+            if (event.data.requestId !== requestId) {
               console.log('[Store] Ignoring stale error message. Current requestId:', requestId, 'Received requestId:', event.data.requestId);
               return;
             }
@@ -336,7 +367,6 @@ export class SimulationStoreService {
             this.allocatedEmployeeIds.set(allocatedIds);
 
             completed = true;
-            this.isLoading.set(false);
             this.hasCalculatedResults = true;
             console.log('[Store] Emitting result via observer.next()');
             observer.next(result);
@@ -359,7 +389,7 @@ export class SimulationStoreService {
           // Fallback: treat as AllocationResult if no type field (backward compatibility)
           const result = event.data as AllocationResult;
           if (result.allocation && result.department) {
-            if (event.data.requestId && event.data.requestId !== requestId) {
+            if (event.data.requestId !== requestId) {
               console.log('[Store] Ignoring stale LEGACY message. Current requestId:', requestId, 'Received requestId:', event.data.requestId);
               return;
             }
@@ -374,7 +404,6 @@ export class SimulationStoreService {
             this.allocatedEmployeeIds.set(allocatedIds);
 
             completed = true;
-            this.isLoading.set(false);
             this.hasCalculatedResults = true;
             console.log('[Store] Emitting result via observer.next()');
             observer.next(result);
@@ -396,7 +425,6 @@ export class SimulationStoreService {
           console.error('[Store] Error processing worker message:', error);
           if (!completed) {
             completed = true;
-            this.isLoading.set(false);
             cleanup();
             observer.next(null);
             observer.complete();
@@ -456,7 +484,7 @@ export class SimulationStoreService {
     this.hasCalculatedResults = false;
     this.simulationCache.clear();
     console.log('[Store] Cache cleared for manual recalculation');
-    this.triggerRecalculation();
+    this.recalculateTrigger$.next();
   }
 
   loadInitialData(count: number = 100): void {
