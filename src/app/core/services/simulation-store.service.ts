@@ -47,6 +47,7 @@ export class SimulationStoreService {
   private hasCalculatedResults = false;
   private isManualRecalculation = false;
   private csvDataCached = false;
+  private simulationCache = new Map<string, { result100: AllocationResult; result110: AllocationResult | null }>();
 
   constructor(
     private httpClient: HttpClient,
@@ -74,6 +75,8 @@ export class SimulationStoreService {
     // Create a trigger for locked employees changes
     const lockedEmployeesTrigger$ = new BehaviorSubject<Record<string, string>>({});
     let previousEmployeeIds: string[] = [];
+    let previousObjective: DepartmentObjective | null = null;
+    let previousLockedEmployees: Record<string, string> = {};
 
     combineLatest([
       this.employees$,
@@ -106,11 +109,19 @@ export class SimulationStoreService {
 
           previousEmployeeIds = currentEmployeeIds;
 
+          // Detect if objective or locked employees have changed
+          const currentLockedEmployees = this.lockedEmployees();
+          const objectiveChanged = previousObjective !== objective;
+          const lockedEmployeesChanged = JSON.stringify(previousLockedEmployees) !== JSON.stringify(currentLockedEmployees);
+
+          previousObjective = objective;
+          previousLockedEmployees = { ...currentLockedEmployees };
+
           // Skip auto-calculation if:
           // 1. Cache exists and NOT a manual recalculation AND
-          // 2. Employee data hasn't changed
-          if (this.hasCalculatedResults && !this.isManualRecalculation && !employeeDataChanged) {
-            console.log('[Store] Cache exists and employee data unchanged, skipping auto-calculation');
+          // 2. Employee data, objective, and locked employees haven't changed
+          if (this.hasCalculatedResults && !this.isManualRecalculation && !employeeDataChanged && !objectiveChanged && !lockedEmployeesChanged) {
+            console.log('[Store] Cache exists and nothing changed, skipping auto-calculation');
             this.isLoading.set(false);
             // Display cached results without re-running simulation
             const result100 = this.simulationResult100$.value;
@@ -127,19 +138,18 @@ export class SimulationStoreService {
 
           // Trigger new simulation for manual recalc or new employee data
           if (employeeDataChanged) {
-            console.log('[Store] Employee data changed, resetting calculation cache');
+            console.log('[Store] Employee data changed, resetting calculation cache and Map cache');
             this.hasCalculatedResults = false;
             this.simulationResult100$.next(null);
             this.simulationResult110$.next(null);
+            this.simulationCache.clear();
           }
 
           this.isManualRecalculation = false;
           console.log('[Store] Starting dual simulation');
           this.isLoading.set(true);
 
-          const lockedEmployees = this.lockedEmployees();
-
-          return this.runDualSimulation(employees, objective, lockedEmployees);
+          return this.runDualSimulation(employees, objective, currentLockedEmployees);
         }),
         tap((results) => {
           console.log('[Store] Simulation results received:', results ? 'success' : 'null');
@@ -203,7 +213,15 @@ export class SimulationStoreService {
     employees: Employee[],
     objective: DepartmentObjective,
     lockedEmployees: Record<string, string>
-  ): Observable<{ result100: AllocationResult; result110: AllocationResult } | null> {
+  ): Observable<{ result100: AllocationResult; result110: AllocationResult | null } | null> {
+    const cacheKey = this.generateCacheKey(objective, lockedEmployees);
+
+    if (this.simulationCache.has(cacheKey)) {
+      console.log('[Store] Cache hit! Restoring results from Map cache (0ms)');
+      const cachedResults = this.simulationCache.get(cacheKey)!;
+      return of({ result100: cachedResults.result100, result110: cachedResults.result110 });
+    }
+
     console.log('[Store] Starting dual simulation: running 100-employee first, then 110-employee sequentially');
 
     return this.runSimulationWithHybridEngine(
@@ -229,10 +247,13 @@ export class SimulationStoreService {
         ).pipe(
           map((result110) => {
             if (!result110) {
-              console.error('[Store] 110-employee simulation failed');
-              return null;
+              console.error('[Store] 110-employee simulation failed, using 100-employee result only');
+              this.simulationCache.set(cacheKey, { result100, result110: null });
+              return { result100, result110: null };
             }
             console.log('[Store] Both simulations completed successfully.');
+            this.simulationCache.set(cacheKey, { result100, result110 });
+            console.log('[Store] Results cached in Map for future use');
             return { result100, result110 };
           })
         );
@@ -394,6 +415,11 @@ export class SimulationStoreService {
     });
   }
 
+  private generateCacheKey(objective: DepartmentObjective, lockedEmployees: Record<string, string>): string {
+    const lockedKey = JSON.stringify(lockedEmployees);
+    return `${objective}|${lockedKey}`;
+  }
+
   private triggerRecalculation(): void {
     const employees = this.employees$.value;
     this.employees$.next([...employees]);
@@ -404,6 +430,8 @@ export class SimulationStoreService {
     this.isLoading.set(true);
     this.isManualRecalculation = true;
     this.hasCalculatedResults = false;
+    this.simulationCache.clear();
+    console.log('[Store] Cache cleared for manual recalculation');
     this.triggerRecalculation();
   }
 
