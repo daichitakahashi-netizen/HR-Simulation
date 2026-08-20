@@ -313,16 +313,6 @@ export class DashboardComponent implements OnInit {
     return value !== null && value !== undefined && !isNaN(value);
   }
 
-  private objectiveToJapaneseName(objective: string): string {
-    const mapping: Record<string, string> = {
-      'totalRevenue': '全社売上最大化',
-      'departmentAProfitMaximize': 'A事業部利益最大化',
-      'departmentBRevenueMaximize': 'B事業部売上最大化',
-      'departmentCRevenueMaximize': 'C事業部売上最大化',
-    };
-    return mapping[objective] || objective;
-  }
-
   async openSaveScenarioDialog(): Promise<void> {
     const { SaveScenarioDialogComponent } = await import('./save-scenario-dialog/save-scenario-dialog.component');
     const dialogRef = this.dialog.open(SaveScenarioDialogComponent);
@@ -340,7 +330,7 @@ export class DashboardComponent implements OnInit {
       }
 
       const objective = this.selectedObjective();
-      const finalName = scenarioName.trim() || this.objectiveToJapaneseName(objective);
+      const finalName = scenarioName.trim() || this.store.getObjectiveJapaneseName(objective);
 
       const scenario = {
         name: finalName,

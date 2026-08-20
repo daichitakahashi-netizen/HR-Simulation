@@ -256,19 +256,24 @@ export class SimulationStoreService {
         return;
       }
 
+      let completed = false;
       let handleMessage: ((event: MessageEvent) => void) | null = null;
       let handleError: ((error: ErrorEvent | any) => void) | null = null;
 
       const cleanup = () => {
-        if (handleMessage) {
-          this.simulationWorker!.removeEventListener('message', handleMessage);
+        if (handleMessage && this.simulationWorker) {
+          this.simulationWorker.removeEventListener('message', handleMessage);
         }
-        if (handleError) {
-          this.simulationWorker!.removeEventListener('error', handleError);
+        if (handleError && this.simulationWorker) {
+          this.simulationWorker.removeEventListener('error', handleError);
         }
+        handleMessage = null;
+        handleError = null;
       };
 
       handleMessage = (event: MessageEvent) => {
+        if (completed) return;
+
         try {
           console.log('[Store] Received message from worker:', event.data.type || 'LEGACY');
 
@@ -277,8 +282,9 @@ export class SimulationStoreService {
           if (type === 'ERROR') {
             console.error('[Store] Worker reported error:', error, stack);
             this.snackBar.open(`計算エラー: ${error}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
-            this.isLoading.set(false);
+            completed = true;
             cleanup();
+            this.isLoading.set(false);
             observer.next(null);
             observer.complete();
             return;
@@ -304,6 +310,7 @@ export class SimulationStoreService {
             this.updateDisplayReasonText();
             this.allocatedEmployeeIds.set(allocatedIds);
 
+            completed = true;
             cleanup();
             this.isLoading.set(false);
             this.hasCalculatedResults = true;
@@ -333,6 +340,7 @@ export class SimulationStoreService {
             this.updateDisplayReasonText();
             this.allocatedEmployeeIds.set(allocatedIds);
 
+            completed = true;
             cleanup();
             this.isLoading.set(false);
             this.hasCalculatedResults = true;
@@ -342,19 +350,25 @@ export class SimulationStoreService {
           }
         } catch (error) {
           console.error('[Store] Error processing worker message:', error);
-          this.isLoading.set(false);
-          if (handleError) {
-            handleError(error as any);
+          if (!completed) {
+            completed = true;
+            cleanup();
+            this.isLoading.set(false);
+            observer.next(null);
+            observer.complete();
           }
         }
       };
 
       handleError = (error: ErrorEvent | any) => {
+        if (completed) return;
+
         console.error('[Store] Worker error event:', error);
         const errorMsg = error instanceof ErrorEvent ? error.message : (error?.message || 'Unknown worker error');
         this.snackBar.open(`Workerエラー: ${errorMsg}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
-        this.isLoading.set(false);
+        completed = true;
         cleanup();
+        this.isLoading.set(false);
         observer.next(null);
         observer.complete();
       };
@@ -369,6 +383,14 @@ export class SimulationStoreService {
         totalEmployees,
         lockedEmployees,
       });
+
+      return () => {
+        if (!completed) {
+          completed = true;
+          cleanup();
+          this.isLoading.set(false);
+        }
+      };
     });
   }
 
@@ -438,6 +460,17 @@ export class SimulationStoreService {
   updateObjective(objective: DepartmentObjective | string): void {
     const obj = objective as DepartmentObjective;
     this.currentObjective$.next(obj);
+    this.selectedObjective.set(obj);
+  }
+
+  getObjectiveJapaneseName(objective: string): string {
+    const mapping: Record<string, string> = {
+      'totalRevenue': '全社売上最大化',
+      'departmentAProfitMaximize': 'A事業部利益最大化',
+      'departmentBRevenueMaximize': 'B事業部売上最大化',
+      'departmentCRevenueMaximize': 'C事業部売上最大化',
+    };
+    return mapping[objective] || objective;
   }
 
   updateAllocation(allocation: AllocationMap): void {
