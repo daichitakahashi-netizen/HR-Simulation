@@ -46,6 +46,7 @@ export class SimulationStoreService {
   private snackBar = inject(MatSnackBar);
   private hasCalculatedResults = false;
   private isManualRecalculation = false;
+  private csvDataCached = false;
 
   constructor(
     private httpClient: HttpClient,
@@ -72,6 +73,7 @@ export class SimulationStoreService {
   private setupReactiveDataFlow(): void {
     // Create a trigger for locked employees changes
     const lockedEmployeesTrigger$ = new BehaviorSubject<Record<string, string>>({});
+    let previousEmployeeIds: string[] = [];
 
     combineLatest([
       this.employees$,
@@ -83,8 +85,7 @@ export class SimulationStoreService {
           return JSON.stringify(prev) === JSON.stringify(curr);
         }),
         tap(() => {
-          console.log('[Store] Employees/Objective changed, setting loading state');
-          this.isLoading.set(true);
+          console.log('[Store] Employees/Objective/Locked changed');
         }),
         switchMap(([employees, objective]) => {
           console.log('[Store] Switch to simulation with', employees.length, 'employees and objective:', objective);
@@ -97,14 +98,44 @@ export class SimulationStoreService {
             return of(null);
           }
 
-          // Skip auto-calculation if cache exists and not a manual recalculation
-          if (this.hasCalculatedResults && !this.isManualRecalculation) {
-            console.log('[Store] Cache exists, skipping auto-calculation');
+          // Detect if employee data has changed (new CSV load or employee list updated)
+          const currentEmployeeIds = employees.map(e => e.id).sort();
+          const employeeDataChanged =
+            previousEmployeeIds.length === 0 ||
+            JSON.stringify(previousEmployeeIds) !== JSON.stringify(currentEmployeeIds);
+
+          previousEmployeeIds = currentEmployeeIds;
+
+          // Skip auto-calculation if:
+          // 1. Cache exists and NOT a manual recalculation AND
+          // 2. Employee data hasn't changed
+          if (this.hasCalculatedResults && !this.isManualRecalculation && !employeeDataChanged) {
+            console.log('[Store] Cache exists and employee data unchanged, skipping auto-calculation');
             this.isLoading.set(false);
+            // Display cached results without re-running simulation
+            const result100 = this.simulationResult100$.value;
+            const result110 = this.simulationResult110$.value;
+            if (result100) {
+              const displayResult = this.is110Mode() ? (result110 || result100) : result100;
+              this.simulationResult.set(displayResult);
+              this.baselineResult.set(result100);
+              this.allocation.set(displayResult.allocation);
+            }
+            this.updateDisplayReasonText();
             return of(null);
           }
 
+          // Trigger new simulation for manual recalc or new employee data
+          if (employeeDataChanged) {
+            console.log('[Store] Employee data changed, resetting calculation cache');
+            this.hasCalculatedResults = false;
+            this.simulationResult100$.next(null);
+            this.simulationResult110$.next(null);
+          }
+
           this.isManualRecalculation = false;
+          console.log('[Store] Starting dual simulation');
+          this.isLoading.set(true);
 
           const lockedEmployees = this.lockedEmployees();
 
@@ -345,6 +376,12 @@ export class SimulationStoreService {
   }
 
   loadInitialData(count: number = 100): void {
+    // Skip if CSV data is already cached
+    if (this.csvDataCached && this.employees$.value.length > 0) {
+      console.log('[Store] CSV data already cached, skipping reload');
+      return;
+    }
+
     this.isLoading.set(true);
     console.log('[Store] Loading initial CSV data');
 
@@ -356,6 +393,7 @@ export class SimulationStoreService {
         let parsedEmployees = this.csvParserService.parseEmployeesCsv(csvText);
         console.log('[Store] CSV parsed, employee count:', parsedEmployees.length);
 
+        this.csvDataCached = true;
         // Always load 100-employee base data; later use runDualSimulation for both 100 and 110
         // Note: isLoading state will be managed by reactive flow (setupReactiveDataFlow)
         this.employees$.next(parsedEmployees);
@@ -457,9 +495,12 @@ export class SimulationStoreService {
 
     this.lockedEmployees.set(locked);
 
-    // Trigger recalculation with locked employees via employees$ trigger
-    const employees = this.employees$.value;
-    this.employees$.next([...employees]);
+    // Trigger recalculation via locked employees change (manual recalc required)
+    this.isManualRecalculation = true;
+    const lockedEmployeesTrigger$ = (this as any).lockedEmployeesTrigger$;
+    if (lockedEmployeesTrigger$) {
+      lockedEmployeesTrigger$.next(locked);
+    }
 
     this.snackBar.open('ロック設定を更新しました', '✓', { duration: 3000 });
   }
