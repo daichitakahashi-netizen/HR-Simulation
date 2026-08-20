@@ -34,6 +34,22 @@
           </mat-chip>
         </div>
       }
+
+      <!-- Recalculation Button -->
+      <div style="margin-top: 0.75rem;">
+        <button
+          mat-raised-button
+          color="accent"
+          (click)="triggerRecalculation()"
+          [disabled]="isLoading()"
+          style="width: 100%;">
+          @if (isLoading()) {
+            計算中...
+          } @else {
+            再計算を実行
+          }
+        </button>
+      </div>
     </div>
 
     <!-- 110 Name Toggle -->

@@ -259,6 +259,10 @@ export class DashboardComponent implements OnInit {
     this.store.setEmployeeCount(value);
   }
 
+  triggerRecalculation(): void {
+    this.store.runSimulation();
+  }
+
   openMemberDialog(departmentId: string, departmentLabel: string): void {
     const allocatedIds = this.store.allocatedEmployeeIds();
     const deptAllocatedIds = allocatedIds[departmentId] || [];

@@ -44,6 +44,8 @@ export class SimulationStoreService {
 
   private simulationWorker: Worker | null = null;
   private snackBar = inject(MatSnackBar);
+  private hasCalculatedResults = false;
+  private isManualRecalculation = false;
 
   constructor(
     private httpClient: HttpClient,
@@ -95,6 +97,15 @@ export class SimulationStoreService {
             return of(null);
           }
 
+          // Skip auto-calculation if cache exists and not a manual recalculation
+          if (this.hasCalculatedResults && !this.isManualRecalculation) {
+            console.log('[Store] Cache exists, skipping auto-calculation');
+            this.isLoading.set(false);
+            return of(null);
+          }
+
+          this.isManualRecalculation = false;
+
           const lockedEmployees = this.lockedEmployees();
 
           return this.runDualSimulation(employees, objective, lockedEmployees);
@@ -106,6 +117,7 @@ export class SimulationStoreService {
             this.simulationResult100$.next(result100);
             this.simulationResult110$.next(result110);
             this.has110Data.set(result110 !== null);
+            this.hasCalculatedResults = true;
 
             const displayResult = this.is110Mode() ? (result110 || result100) : result100;
             if (displayResult) {
@@ -212,7 +224,19 @@ export class SimulationStoreService {
         return;
       }
 
-      const handleMessage = (event: MessageEvent) => {
+      let handleMessage: ((event: MessageEvent) => void) | null = null;
+      let handleError: ((error: ErrorEvent | any) => void) | null = null;
+
+      const cleanup = () => {
+        if (handleMessage) {
+          this.simulationWorker!.removeEventListener('message', handleMessage);
+        }
+        if (handleError) {
+          this.simulationWorker!.removeEventListener('error', handleError);
+        }
+      };
+
+      handleMessage = (event: MessageEvent) => {
         try {
           console.log('[Store] Received message from worker:', event.data.type || 'LEGACY');
 
@@ -221,8 +245,7 @@ export class SimulationStoreService {
           if (type === 'ERROR') {
             console.error('[Store] Worker reported error:', error, stack);
             this.snackBar.open(`計算エラー: ${error}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
-            this.simulationWorker!.removeEventListener('message', handleMessage);
-            this.simulationWorker!.removeEventListener('error', handleError);
+            cleanup();
             observer.next(null);
             observer.complete();
             return;
@@ -248,8 +271,7 @@ export class SimulationStoreService {
             this.updateDisplayReasonText();
             this.allocatedEmployeeIds.set(allocatedIds);
 
-            this.simulationWorker!.removeEventListener('message', handleMessage);
-            this.simulationWorker!.removeEventListener('error', handleError);
+            cleanup();
             console.log('[Store] Emitting result via observer.next()');
             observer.next(result);
             observer.complete();
@@ -276,24 +298,24 @@ export class SimulationStoreService {
             this.updateDisplayReasonText();
             this.allocatedEmployeeIds.set(allocatedIds);
 
-            this.simulationWorker!.removeEventListener('message', handleMessage);
-            this.simulationWorker!.removeEventListener('error', handleError);
+            cleanup();
             console.log('[Store] Emitting result via observer.next()');
             observer.next(result);
             observer.complete();
           }
         } catch (error) {
           console.error('[Store] Error processing worker message:', error);
-          handleError(error as any);
+          if (handleError) {
+            handleError(error as any);
+          }
         }
       };
 
-      const handleError = (error: ErrorEvent | any) => {
+      handleError = (error: ErrorEvent | any) => {
         console.error('[Store] Worker error event:', error);
         const errorMsg = error instanceof ErrorEvent ? error.message : (error?.message || 'Unknown worker error');
         this.snackBar.open(`Workerエラー: ${errorMsg}`, '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
-        this.simulationWorker!.removeEventListener('message', handleMessage);
-        this.simulationWorker!.removeEventListener('error', handleError);
+        cleanup();
         observer.next(null);
         observer.complete();
       };
@@ -314,6 +336,12 @@ export class SimulationStoreService {
   private triggerRecalculation(): void {
     const employees = this.employees$.value;
     this.employees$.next([...employees]);
+  }
+
+  runSimulation(): void {
+    console.log('[Store] Manual recalculation initiated');
+    this.isManualRecalculation = true;
+    this.triggerRecalculation();
   }
 
   loadInitialData(count: number = 100): void {
