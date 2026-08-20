@@ -11,9 +11,11 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatIconModule } from '@angular/material/icon';
 import { ChartConfiguration } from 'chart.js';
 import { BaseChartDirective } from 'ng2-charts';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
+import { ScenarioRepositoryService } from '../../core/services/scenario-repository.service';
 import { AllocationResult } from '../../core/models/simulation.model';
 import { MemberDialogComponent } from './member-dialog/member-dialog.component';
 
@@ -32,6 +34,7 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
     MatDialogModule,
     MatBadgeModule,
     MatSnackBarModule,
+    MatIconModule,
     BaseChartDirective,
   ],
   templateUrl: './dashboard.component.html',
@@ -41,6 +44,7 @@ export class DashboardComponent implements OnInit {
   private store = inject(SimulationStoreService);
   private dialog = inject(MatDialog);
   private snackBar = inject(MatSnackBar);
+  private scenarioRepository = inject(ScenarioRepositoryService);
   readonly Object = Object;
 
   readonly isLoading = this.store.isLoading;
@@ -307,5 +311,67 @@ export class DashboardComponent implements OnInit {
   // Check if a number is valid (not NaN, not undefined, not null)
   isValidNumber(value: number | undefined | null): boolean {
     return value !== null && value !== undefined && !isNaN(value);
+  }
+
+  async openSaveScenarioDialog(): Promise<void> {
+    const { SaveScenarioDialogComponent } = await import('./save-scenario-dialog/save-scenario-dialog.component');
+    const dialogRef = this.dialog.open(SaveScenarioDialogComponent);
+    const scenarioName = await dialogRef.afterClosed().toPromise();
+
+    if (!scenarioName) {
+      return;
+    }
+
+    try {
+      const result = this.simulationResult();
+      if (!result) {
+        this.snackBar.open('シミュレーション結果が見つかりません', 'OK', { duration: 3000 });
+        return;
+      }
+
+      const scenario = {
+        name: scenarioName,
+        objective: this.selectedObjective(),
+        totalRevenue: result.summary.totalRevenue,
+        totalCost: result.summary.totalCost,
+        totalProfit: result.summary.totalProfit,
+        departmentSummaries: {
+          A: {
+            allocatedEmployees: result.department['A'].allocatedEmployees,
+            departmentCapability: result.department['A'].departmentCapability,
+            fulfillmentRate: result.department['A'].fulfillmentRate,
+            finalRevenue: result.department['A'].finalRevenue,
+            cost: result.department['A'].cost,
+            profit: result.department['A'].profit,
+          },
+          B: {
+            allocatedEmployees: result.department['B'].allocatedEmployees,
+            departmentCapability: result.department['B'].departmentCapability,
+            fulfillmentRate: result.department['B'].fulfillmentRate,
+            finalRevenue: result.department['B'].finalRevenue,
+            cost: result.department['B'].cost,
+            profit: result.department['B'].profit,
+          },
+          C: {
+            allocatedEmployees: result.department['C'].allocatedEmployees,
+            departmentCapability: result.department['C'].departmentCapability,
+            fulfillmentRate: result.department['C'].fulfillmentRate,
+            finalRevenue: result.department['C'].finalRevenue,
+            cost: result.department['C'].cost,
+            profit: result.department['C'].profit,
+          },
+        },
+        decisionReason: this.reasonText(),
+        allocation: this.store.allocation(),
+        allocationResult: result,
+        employeeCount: this.employeeCount(),
+      };
+
+      await this.scenarioRepository.saveScenario(scenario);
+      this.snackBar.open(`シナリオ「${scenarioName}」を保存しました`, 'OK', { duration: 3000 });
+    } catch (error) {
+      console.error('Error saving scenario:', error);
+      this.snackBar.open('シナリオの保存に失敗しました', 'OK', { duration: 3000 });
+    }
   }
 }

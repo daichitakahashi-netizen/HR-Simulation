@@ -1,3 +1,5 @@
+import { AllocationResult, AllocationMap } from './simulation.model';
+
 export interface ScenarioDepartmentSummary {
   allocatedEmployees: number;
   departmentCapability: number;
@@ -10,6 +12,7 @@ export interface ScenarioDepartmentSummary {
 export interface ScenarioSummary {
   id?: string;
   timestamp?: number;
+  name?: string;
   objective: string;
   totalRevenue: number;
   totalCost: number;
@@ -20,4 +23,7 @@ export interface ScenarioSummary {
     C: ScenarioDepartmentSummary;
   };
   decisionReason: string;
+  allocation?: AllocationMap;
+  allocationResult?: AllocationResult;
+  employeeCount?: number;
 }

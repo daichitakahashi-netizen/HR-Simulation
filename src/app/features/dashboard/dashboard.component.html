@@ -91,7 +91,17 @@
   <div class="right-panel">
     <!-- Company KPI Summary -->
     <div class="kpi-summary">
-      <h2>全社KPIサマリー</h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h2 style="margin: 0;">全社KPIサマリー</h2>
+        <button
+          mat-raised-button
+          color="primary"
+          (click)="openSaveScenarioDialog()"
+          [disabled]="isLoading() || !simulationResult()">
+          <mat-icon>save</mat-icon>
+          シナリオを保存
+        </button>
+      </div>
       <div class="kpi-cards">
         <mat-card class="kpi-card">
           <mat-card-content>
