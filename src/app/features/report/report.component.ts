@@ -7,6 +7,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
 import { AllocationResult, DepartmentConfig } from '../../core/models/simulation.model';
+import * as XLSX from 'xlsx';
 
 @Component({
   selector: 'app-report',
@@ -22,14 +23,44 @@ import { AllocationResult, DepartmentConfig } from '../../core/models/simulation
   styleUrl: './report.component.scss',
 })
 export class ReportComponent implements OnInit {
-  simulationResult = signal<AllocationResult | null>(null);
-  employees = signal<any[]>([]);
-  allocation = signal<Record<string, number>>({});
-  warnings = signal<string[]>([]);
+  simulationResult = computed(() => this.simulationStore.simulationResult());
+  employees = computed(() => this.simulationStore.employees());
+  allocation = computed(() => this.simulationStore.allocation());
+  warnings = computed(() => {
+    const warnings: string[] = [];
+    const result = this.simulationResult();
+    const alloc = this.allocation();
+
+    if (!result) return warnings;
+
+    // Check minimum headcount constraints
+    Object.entries(this.departmentConfigs).forEach(([dept, config]) => {
+      const allocatedCount = alloc[dept] || 0;
+      if (allocatedCount < config.minHeadcount) {
+        warnings.push(
+          `⚠️ ${dept}事業部: 配置人数${allocatedCount}名は最低配置人数${config.minHeadcount}名を下回っています`
+        );
+      }
+    });
+
+    // Check fulfillment rate and penalize large deviations
+    Object.entries(result.department).forEach(([dept, deptResult]) => {
+      const fulfillmentRate = deptResult.fulfillmentRate;
+      if (fulfillmentRate < 0.7) {
+        warnings.push(
+          `⚠️ ${dept}事業部: 充足率${(fulfillmentRate * 100).toFixed(1)}%が低く、ペナルティが大きく発生しています`
+        );
+      }
+    });
+
+    return warnings;
+  });
   revenueLessThan58B = computed(() => {
     const result = this.simulationResult();
     return result ? result.summary.totalRevenue < 5.8 : false;
   });
+  readonly reasonText = computed(() => this.simulationStore.reasonText());
+  readonly userNotes = computed(() => this.simulationStore.userNotes());
   now = new Date();
 
   private departmentConfigs: Record<string, DepartmentConfig> = {
@@ -56,62 +87,38 @@ export class ReportComponent implements OnInit {
   constructor(private simulationStore: SimulationStoreService) {}
 
   ngOnInit(): void {
-    this.simulationResult.set(this.simulationStore.simulationResult());
-    this.employees.set(this.simulationStore.employees());
-    this.allocation.set(this.simulationStore.allocation());
-    this.checkConstraints();
-  }
-
-  private checkConstraints(): void {
-    const warnings: string[] = [];
-    const result = this.simulationResult();
-    const alloc = this.allocation();
-
-    if (!result) return;
-
-    // Check minimum headcount constraints
-    Object.entries(this.departmentConfigs).forEach(([dept, config]) => {
-      const allocatedCount = alloc[dept] || 0;
-      if (allocatedCount < config.minHeadcount) {
-        warnings.push(
-          `⚠️ ${dept}事業部: 配置人数${allocatedCount}名は最低配置人数${config.minHeadcount}名を下回っています`
-        );
-      }
-    });
-
-    // Check fulfillment rate and penalize large deviations
-    Object.entries(result.department).forEach(([dept, deptResult]) => {
-      const fulfillmentRate = deptResult.fulfillmentRate;
-      if (fulfillmentRate < 0.7) {
-        warnings.push(
-          `⚠️ ${dept}事業部: 充足率${(fulfillmentRate * 100).toFixed(1)}%が低く、ペナルティが大きく発生しています`
-        );
-      }
-    });
-
-    this.warnings.set(warnings);
+    // No need to manually set signals; computed properties now track store values directly
   }
 
   print(): void {
     window.print();
   }
 
-  downloadCsv(): void {
+  downloadExcel(): void {
     const result = this.simulationResult();
     const emps = this.employees();
     const alloc = this.allocation();
+    const objectiveName = this.extractObjectiveName(this.reasonText());
 
     if (!result || emps.length === 0) return;
 
-    const csvData = this.generateCsv(emps, alloc, result);
-    this.triggerDownload(csvData, 'allocation_list.csv');
+    const workbook = this.generateExcel(emps, alloc, result);
+    const dateStr = this.now.toISOString().split('T')[0].replace(/-/g, '');
+    const filename = `配置リスト_${objectiveName}_${dateStr}.xlsx`;
+    XLSX.writeFile(workbook, filename);
   }
 
-  private generateCsv(
+  private extractObjectiveName(reasonText: string): string {
+    if (!reasonText) return '設定';
+    const match = reasonText.match(/（([^）]+)）/);
+    return match ? match[1] : '設定';
+  }
+
+  private generateExcel(
     employees: any[],
     allocation: Record<string, number>,
     result: AllocationResult
-  ): string {
+  ): XLSX.WorkBook {
     const headers = [
       '社員ID',
       '配置事業部',
@@ -119,16 +126,17 @@ export class ReportComponent implements OnInit {
       '管理力',
       '開拓力',
       '育成力',
-      '人件費',
+      '人件費(100万円)',
+      '事業部貢献度',
     ];
 
-    const rows: string[] = [headers.join(',')];
+    const data: any[] = [headers];
 
-    // Build allocation map: employee -> department
     const employeeToDepartment = this.buildEmployeeAllocationMap(employees, allocation, result);
 
     employees.forEach((emp) => {
       const dept = employeeToDepartment[emp.id] || '未配置';
+      const contribution = dept !== '未配置' ? this.calculateContributionByDepartment(emp, dept) : 0;
       const row = [
         emp.id,
         dept,
@@ -137,12 +145,30 @@ export class ReportComponent implements OnInit {
         emp.development,
         emp.nurture,
         emp.personnelCost,
+        contribution.toFixed(2),
       ];
-      rows.push(row.map((v) => this.escapeCsvValue(v.toString())).join(','));
+      data.push(row);
     });
 
-    return rows.join('\n');
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    const columnWidths = [
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 14 },
+    ];
+    worksheet['!cols'] = columnWidths;
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '配置リスト');
+
+    return workbook;
   }
+
 
   private buildEmployeeAllocationMap(
     employees: any[],
@@ -168,11 +194,6 @@ export class ReportComponent implements OnInit {
   }
 
   private calculateContribution(emp: any): number {
-    const weights: Record<string, any> = {
-      A: { sales: 0.45, management: 0.35, development: 0.1, nurture: 0.1 },
-      B: { sales: 0.35, management: 0.2, development: 0.3, nurture: 0.15 },
-      C: { sales: 0.2, management: 0.1, development: 0.5, nurture: 0.2 },
-    };
     const avgWeights = {
       sales: 0.33,
       management: 0.22,
@@ -187,24 +208,19 @@ export class ReportComponent implements OnInit {
     );
   }
 
-  private escapeCsvValue(value: string): string {
-    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-      return `"${value.replace(/"/g, '""')}"`;
-    }
-    return value;
+  private calculateContributionByDepartment(emp: any, department: string): number {
+    const weights: Record<string, any> = {
+      A: { sales: 0.45, management: 0.35, development: 0.1, nurture: 0.1 },
+      B: { sales: 0.35, management: 0.2, development: 0.3, nurture: 0.15 },
+      C: { sales: 0.2, management: 0.1, development: 0.5, nurture: 0.2 },
+    };
+    const w = weights[department] || weights['A'];
+    return (
+      emp.sales * w.sales +
+      emp.management * w.management +
+      emp.development * w.development +
+      emp.nurture * w.nurture
+    );
   }
 
-  private triggerDownload(csvData: string, filename: string): void {
-    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
 }

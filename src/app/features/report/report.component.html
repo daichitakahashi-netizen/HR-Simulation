@@ -4,9 +4,9 @@
       <mat-icon>print</mat-icon>
       レポート印刷
     </button>
-    <button mat-raised-button color="accent" (click)="downloadCsv()">
+    <button mat-raised-button color="accent" (click)="downloadExcel()">
       <mat-icon>download</mat-icon>
-      配置リストダウンロード
+      配置リストダウンロード (.xlsx)
     </button>
   </mat-toolbar>
 </div>
@@ -69,15 +69,15 @@
           <div class="kpi-grid">
             <div class="kpi-item">
               <div class="kpi-label">全社売上</div>
-              <div class="kpi-value">{{ result.summary.totalRevenue.toFixed(1) }}</div>
+              <div class="kpi-value">{{ result.summary.totalRevenue.toFixed(1) }}億円</div>
             </div>
             <div class="kpi-item">
               <div class="kpi-label">全社コスト</div>
-              <div class="kpi-value">{{ result.summary.totalCost.toFixed(1) }}</div>
+              <div class="kpi-value">{{ result.summary.totalCost.toFixed(1) }}億円</div>
             </div>
             <div class="kpi-item">
               <div class="kpi-label">全社利益</div>
-              <div class="kpi-value profit">{{ result.summary.totalProfit.toFixed(1) }}</div>
+              <div class="kpi-value profit">{{ result.summary.totalProfit.toFixed(1) }}億円</div>
             </div>
           </div>
         </div>
@@ -103,14 +103,30 @@
                 </div>
                 <div class="metric-row">
                   <span class="metric-label">売上:</span>
-                  <span class="metric-value">{{ entry.value.finalRevenue.toFixed(1) }}</span>
+                  <span class="metric-value">{{ entry.value.finalRevenue.toFixed(1) }}億円</span>
                 </div>
                 <div class="metric-row">
                   <span class="metric-label">利益:</span>
-                  <span class="metric-value">{{ entry.value.profit.toFixed(1) }}</span>
+                  <span class="metric-value">{{ entry.value.profit.toFixed(1) }}億円</span>
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Decision Reason -->
+        <div class="section decision-reason">
+          <h3>配置方針およびその理由</h3>
+          <div class="decision-reason-content">
+            {{ reasonText() }}
+          </div>
+        </div>
+
+        <!-- User Notes Section (Displayed only if notes exist) -->
+        <div *ngIf="userNotes()" class="section">
+          <h3>■ 人事担当者所感・補足理由</h3>
+          <div class="user-notes-content">
+            {{ userNotes() }}
           </div>
         </div>
       </div>
