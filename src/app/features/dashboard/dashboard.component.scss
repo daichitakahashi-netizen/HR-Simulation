@@ -266,14 +266,21 @@
     padding: 0.1rem 0;
     border-bottom: 1px solid #f0f0f0;
     span { color: #666; }
-    strong { color: #1976d2; font-weight: 600; }
-    .mini-diff-chip {
-      font-size: 0.6rem;
-      padding: 0.08rem 0.25rem;
-      height: auto;
-      color: #fff !important;
-      &.positive { background-color: #4caf50 !important; }
-      &.negative { background-color: #f44336 !important; }
+
+    .value-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.25rem;
+      strong { color: #1976d2; font-weight: 600; text-align: right; }
+      .mini-diff-chip {
+        font-size: 0.6rem;
+        padding: 0.08rem 0.25rem;
+        height: auto;
+        color: #fff !important;
+        &.positive { background-color: #4caf50 !important; }
+        &.negative { background-color: #f44336 !important; }
+      }
     }
   }
 

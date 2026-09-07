@@ -256,46 +256,60 @@
                 <div class="dept-info">
                   <div class="info-row">
                     <span>配置人数:</span>
-                    <strong>{{ isValidNumber(deptResult.allocatedEmployees) ? deptResult.allocatedEmployees : '—' }}</strong>
-                    @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'allocatedDiff') !== 0) {
-                      <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'allocatedDiff') > 0 ? 'positive' : 'negative')">
-                        {{ getDeptDifference(dept.id, 'allocatedDiff') > 0 ? '+' : '' }}{{ getDeptDifference(dept.id, 'allocatedDiff') }}
-                      </mat-chip>
-                    }
+                    <div class="value-wrapper">
+                      @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'allocatedDiff') !== 0) {
+                        <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'allocatedDiff') > 0 ? 'positive' : 'negative')">
+                          {{ getDeptDifference(dept.id, 'allocatedDiff') > 0 ? '+' : '' }}{{ getDeptDifference(dept.id, 'allocatedDiff') }}
+                        </mat-chip>
+                      }
+                      <strong>{{ isValidNumber(deptResult.allocatedEmployees) ? deptResult.allocatedEmployees : '—' }}</strong>
+                    </div>
                   </div>
                   <div class="info-row">
                     <span>能力値:</span>
-                    <strong>{{ isValidNumber(deptResult.departmentCapability) ? (deptResult.departmentCapability | number: '1.1-1') : '—' }}</strong>
+                    <div class="value-wrapper">
+                      <strong>{{ isValidNumber(deptResult.departmentCapability) ? (deptResult.departmentCapability | number: '1.1-1') : '—' }}</strong>
+                    </div>
                   </div>
                   <div class="info-row">
                     <span>基本売上:</span>
-                    <strong>{{ isValidNumber(deptResult.baseRevenue) ? (deptResult.baseRevenue | number: '1.2-2') : '—' }}</strong>
+                    <div class="value-wrapper">
+                      <strong>{{ isValidNumber(deptResult.baseRevenue) ? (deptResult.baseRevenue | number: '1.2-2') : '—' }}</strong>
+                    </div>
                   </div>
                   <div class="info-row">
                     <span>充足率:</span>
-                    <strong>{{ isValidNumber(deptResult.fulfillmentRate) ? (deptResult.fulfillmentRate | number: '1.2-2') : '—' }}</strong>
+                    <div class="value-wrapper">
+                      <strong>{{ isValidNumber(deptResult.fulfillmentRate) ? (deptResult.fulfillmentRate | number: '1.2-2') : '—' }}</strong>
+                    </div>
                   </div>
                   <div class="info-row">
                     <span>最終売上:</span>
-                    <strong>{{ isValidNumber(deptResult.finalRevenue) ? (deptResult.finalRevenue | number: '1.2-2') : '—' }}</strong>
-                    @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'revenueDiff') !== 0) {
-                      <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'revenueDiff') > 0 ? 'positive' : 'negative')">
-                        Δ{{ getDeptDifference(dept.id, 'revenueDiff') > 0 ? '+' : '' }}{{ (getDeptDifference(dept.id, 'revenueDiff') | number: '1.2-2') }}
-                      </mat-chip>
-                    }
+                    <div class="value-wrapper">
+                      @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'revenueDiff') !== 0) {
+                        <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'revenueDiff') > 0 ? 'positive' : 'negative')">
+                          Δ{{ getDeptDifference(dept.id, 'revenueDiff') > 0 ? '+' : '' }}{{ (getDeptDifference(dept.id, 'revenueDiff') | number: '1.2-2') }}
+                        </mat-chip>
+                      }
+                      <strong>{{ isValidNumber(deptResult.finalRevenue) ? (deptResult.finalRevenue | number: '1.2-2') : '—' }}</strong>
+                    </div>
                   </div>
                   <div class="info-row">
                     <span>コスト:</span>
-                    <strong>{{ isValidNumber(deptResult.cost) ? (deptResult.cost | number: '1.2-2') : '—' }}</strong>
+                    <div class="value-wrapper">
+                      <strong>{{ isValidNumber(deptResult.cost) ? (deptResult.cost | number: '1.2-2') : '—' }}</strong>
+                    </div>
                   </div>
                   <div class="info-row">
                     <span>利益:</span>
-                    <strong>{{ isValidNumber(deptResult.profit) ? (deptResult.profit | number: '1.2-2') : '—' }}</strong>
-                    @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'profitDiff') !== 0) {
-                      <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'profitDiff') > 0 ? 'positive' : 'negative')">
-                        Δ{{ getDeptDifference(dept.id, 'profitDiff') > 0 ? '+' : '' }}{{ (getDeptDifference(dept.id, 'profitDiff') | number: '1.2-2') }}
-                      </mat-chip>
-                    }
+                    <div class="value-wrapper">
+                      @if (is110Mode() && deptDifferences() && getDeptDifference(dept.id, 'profitDiff') !== 0) {
+                        <mat-chip [class]="'mini-diff-chip ' + (getDeptDifference(dept.id, 'profitDiff') > 0 ? 'positive' : 'negative')">
+                          Δ{{ getDeptDifference(dept.id, 'profitDiff') > 0 ? '+' : '' }}{{ (getDeptDifference(dept.id, 'profitDiff') | number: '1.2-2') }}
+                        </mat-chip>
+                      }
+                      <strong>{{ isValidNumber(deptResult.profit) ? (deptResult.profit | number: '1.2-2') : '—' }}</strong>
+                    </div>
                   </div>
                 </div>
 
