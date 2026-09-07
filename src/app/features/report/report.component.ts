@@ -7,7 +7,6 @@ import { MatTableModule } from '@angular/material/table';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
 import { AllocationResult, DepartmentConfig } from '../../core/models/simulation.model';
-import * as XLSX from 'xlsx';
 
 @Component({
   selector: 'app-report',
@@ -94,31 +93,24 @@ export class ReportComponent implements OnInit {
     window.print();
   }
 
-  downloadExcel(): void {
+  downloadCsv(): void {
     const result = this.simulationResult();
     const emps = this.employees();
     const alloc = this.allocation();
-    const objectiveName = this.extractObjectiveName(this.reasonText());
 
     if (!result || emps.length === 0) return;
 
-    const workbook = this.generateExcel(emps, alloc, result);
+    const csv = this.generateCsv(emps, alloc, result);
     const dateStr = this.now.toISOString().split('T')[0].replace(/-/g, '');
-    const filename = `配置リスト_${objectiveName}_${dateStr}.xlsx`;
-    XLSX.writeFile(workbook, filename);
+    const filename = `配置リスト_${dateStr}.csv`;
+    this.triggerDownload(csv, filename);
   }
 
-  private extractObjectiveName(reasonText: string): string {
-    if (!reasonText) return '設定';
-    const match = reasonText.match(/（([^）]+)）/);
-    return match ? match[1] : '設定';
-  }
-
-  private generateExcel(
+  private generateCsv(
     employees: any[],
     allocation: Record<string, number>,
     result: AllocationResult
-  ): XLSX.WorkBook {
+  ): string {
     const headers = [
       '社員ID',
       '配置事業部',
@@ -130,7 +122,7 @@ export class ReportComponent implements OnInit {
       '事業部貢献度',
     ];
 
-    const data: any[] = [headers];
+    const rows: string[] = [this.escapeCSVHeader(headers.join(','))];
 
     const employeeToDepartment = this.buildEmployeeAllocationMap(employees, allocation, result);
 
@@ -147,26 +139,37 @@ export class ReportComponent implements OnInit {
         emp.personnelCost,
         contribution.toFixed(2),
       ];
-      data.push(row);
+      rows.push(this.escapeCSVRow(row));
     });
 
-    const worksheet = XLSX.utils.aoa_to_sheet(data);
-    const columnWidths = [
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 14 },
-    ];
-    worksheet['!cols'] = columnWidths;
+    const bom = '﻿';
+    return bom + rows.join('\n');
+  }
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, '配置リスト');
+  private escapeCSVRow(row: any[]): string {
+    return row.map(cell => this.escapeCSVCell(cell)).join(',');
+  }
 
-    return workbook;
+  private escapeCSVHeader(header: string): string {
+    return header;
+  }
+
+  private escapeCSVCell(cell: any): string {
+    const value = String(cell);
+    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  }
+
+  private triggerDownload(csv: string, filename: string): void {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
 

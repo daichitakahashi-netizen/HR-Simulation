@@ -11,6 +11,8 @@ export interface EmployeeData extends EmployeeAbilities {
   id: string;
   name?: string; // 社員名（オプション）
   personnelCost: number; // 人件費 (1-20)
+  preference?: 'A' | 'B' | 'C' | 'NONE'; // 配属希望（デフォルト 'NONE'）
+  evaluationScore?: 1 | 2 | 3 | 4 | 5; // 評価スコア（デフォルト 3）
 }
 
 // Employee contribution score for a department

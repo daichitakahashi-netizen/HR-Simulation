@@ -1,28 +1,9 @@
 <div class="scenario-container">
-  <div class="action-bar">
-    <button
-      mat-raised-button
-      color="primary"
-      (click)="saveCurrentAsScenario()"
-      [disabled]="!simResult() || isSaving()"
-      class="save-button"
-    >
-      <mat-icon *ngIf="!isSaving()">add_circle</mat-icon>
-      <mat-progress-spinner
-        *ngIf="isSaving()"
-        diameter="24"
-        mode="indeterminate"
-        class="inline-spinner"
-      ></mat-progress-spinner>
-      {{ isSaving() ? '保存中...' : 'シナリオとして保存' }}
-    </button>
-  </div>
-
   <div class="scenarios-grid">
     <div *ngIf="scenarios().length === 0" class="empty-state">
       <mat-card>
         <mat-card-content>
-          <p>保存されたシナリオはありません。上のボタンで現在の配置案を保存してください。</p>
+          <p>保存されたシナリオはありません。</p>
         </mat-card-content>
       </mat-card>
     </div>
@@ -31,10 +12,17 @@
       *ngFor="let scenario of scenarios()"
       class="scenario-card"
       [attr.data-scenario-id]="scenario.id"
+      [ngClass]="{ 'decided-scenario': decidedScenarioId() === scenario.id }"
     >
       <mat-card-header>
         <mat-card-title-group>
-          <mat-card-title>{{ getObjectiveLabel(scenario.objective) }}</mat-card-title>
+          <div class="title-with-badge">
+            <mat-card-title>{{ scenario.name || getObjectiveLabel(scenario.objective) }}</mat-card-title>
+            <span *ngIf="decidedScenarioId() === scenario.id" class="decided-badge">
+              <mat-icon>check_circle</mat-icon>
+              決定済み
+            </span>
+          </div>
           <mat-card-subtitle>
             {{ scenario.timestamp ? (scenario.timestamp | date: 'yyyy/MM/dd HH:mm') : '保存時刻未設定' }}
           </mat-card-subtitle>
@@ -81,16 +69,29 @@
           </div>
         </div>
 
-        <mat-form-field class="full-width memo-field">
-          <mat-label>意思決定の背景・理由</mat-label>
-          <textarea
-            matInput
-            rows="4"
-            [value]="reasonMemos()[scenario.id || ''] || scenario.decisionReason"
-            (change)="updateMemo(scenario.id, $any($event.target).value)"
-            placeholder="このシナリオを選択した理由を記入してください"
-          ></textarea>
-        </mat-form-field>
+        <div class="memo-container">
+          <mat-form-field class="full-width memo-field">
+            <mat-label>意思決定の背景・理由</mat-label>
+            <textarea
+              matInput
+              rows="4"
+              [value]="reasonMemos()[scenario.id || ''] ?? scenario.decisionReason ?? ''"
+              (change)="updateMemo(scenario.id, $any($event.target).value)"
+              placeholder="このシナリオを選択した理由を記入してください"
+            ></textarea>
+          </mat-form-field>
+
+          <mat-form-field class="full-width memo-field">
+            <mat-label>人事担当者メモ・補足理由</mat-label>
+            <textarea
+              matInput
+              rows="3"
+              [value]="userNotesMemos()[scenario.id || ''] ?? scenario.userNotes ?? ''"
+              (change)="updateUserNote(scenario.id, $any($event.target).value)"
+              placeholder="人事担当者の補足説明やメモを記入してください"
+            ></textarea>
+          </mat-form-field>
+        </div>
       </mat-card-content>
 
       <mat-card-actions>

@@ -1,25 +1,54 @@
 <mat-sidenav-container class="sidenav-container">
-  <mat-sidenav #drawer mode="side" opened="true">
+  <mat-sidenav #drawer mode="over" opened="false">
+    <div class="sidenav-header">
+      <button mat-icon-button (click)="drawer.close()">
+        <mat-icon>menu</mat-icon>
+      </button>
+      <span class="drawer-title">HR Simulation</span>
+    </div>
+    <div class="nav-section-header">単年課題検証</div>
     <mat-nav-list>
-      <mat-list-item routerLink="/dashboard" routerLinkActive="active">
+      <mat-list-item routerLink="/simulation/dashboard" routerLinkActive="active">
         <mat-icon matListItemIcon>dashboard</mat-icon>
         <span matListItemTitle>シミュレーション</span>
       </mat-list-item>
-      <mat-list-item routerLink="/department-analysis" routerLinkActive="active">
+      <mat-list-item routerLink="/simulation/department-analysis" routerLinkActive="active">
         <mat-icon matListItemIcon>domain</mat-icon>
         <span matListItemTitle>事業部別分析</span>
       </mat-list-item>
-      <mat-list-item routerLink="/data-management" routerLinkActive="active">
+      <mat-list-item routerLink="/simulation/data-management" routerLinkActive="active">
         <mat-icon matListItemIcon>data_usage</mat-icon>
         <span matListItemTitle>社員データ管理</span>
       </mat-list-item>
-      <mat-list-item routerLink="/scenario-comparison" routerLinkActive="active">
+      <mat-list-item routerLink="/simulation/scenario-comparison" routerLinkActive="active">
         <mat-icon matListItemIcon>compare</mat-icon>
         <span matListItemTitle>シナリオ比較・決定</span>
       </mat-list-item>
-      <mat-list-item routerLink="/report" routerLinkActive="active">
+      <mat-list-item routerLink="/simulation/report" routerLinkActive="active">
         <mat-icon matListItemIcon>assessment</mat-icon>
         <span matListItemTitle>レポート出力</span>
+      </mat-list-item>
+    </mat-nav-list>
+
+    <mat-divider></mat-divider>
+
+    <div class="nav-section-header">経年タレントマネジメント</div>
+    <mat-nav-list>
+      <mat-list-item routerLink="/hr-planning/dashboard" routerLinkActive="active">
+        <mat-icon matListItemIcon>dashboard</mat-icon>
+        <span matListItemTitle>経年ダッシュボード</span>
+      </mat-list-item>
+      <mat-list-item routerLink="/hr-planning/karte" routerLinkActive="active">
+        <mat-icon matListItemIcon>assignment_ind</mat-icon>
+        <span matListItemTitle>人事カルテ</span>
+      </mat-list-item>
+      <mat-list-item routerLink="/hr-planning/analytics" routerLinkActive="active">
+        <mat-icon matListItemIcon>trending_up</mat-icon>
+        <span matListItemTitle>経年推移分析</span>
+      </mat-list-item>
+      <mat-list-item routerLink="/hr-planning/scenarios" routerLinkActive="active">
+        <mat-icon matListItemIcon>folder</mat-icon>
+        <span matListItemTitle>経年シナリオ管理</span>
       </mat-list-item>
     </mat-nav-list>
   </mat-sidenav>

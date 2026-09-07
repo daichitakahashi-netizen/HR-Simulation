@@ -4,10 +4,15 @@
       <mat-icon>print</mat-icon>
       レポート印刷
     </button>
-    <button mat-raised-button color="accent" (click)="downloadExcel()">
-      <mat-icon>download</mat-icon>
-      配置リストダウンロード (.xlsx)
-    </button>
+    <div class="download-section">
+      <button mat-raised-button color="accent" (click)="downloadCsv()">
+        <mat-icon>download</mat-icon>
+        配置リストダウンロード
+      </button>
+      <div class="download-note">
+        ※ダウンロードされたCSVファイルは、ExcelやGoogleスプレッドシート等に読み込んでご活用いただけます。
+      </div>
+    </div>
   </mat-toolbar>
 </div>
 

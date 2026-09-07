@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
-import { MatSelectModule } from '@angular/material/select';
+import { MatRadioModule } from '@angular/material/radio';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatExpansionModule } from '@angular/material/expansion';
@@ -12,6 +12,8 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
+import { TextFieldModule } from '@angular/cdk/text-field';
 import { ChartConfiguration } from 'chart.js';
 import { BaseChartDirective } from 'ng2-charts';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
@@ -24,7 +26,7 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
   imports: [
     CommonModule,
     MatCardModule,
-    MatSelectModule,
+    MatRadioModule,
     MatFormFieldModule,
     MatSlideToggleModule,
     MatExpansionModule,
@@ -35,6 +37,8 @@ import { MemberDialogComponent } from './member-dialog/member-dialog.component';
     MatBadgeModule,
     MatSnackBarModule,
     MatIconModule,
+    MatInputModule,
+    TextFieldModule,
     BaseChartDirective,
   ],
   templateUrl: './dashboard.component.html',
@@ -56,6 +60,8 @@ export class DashboardComponent implements OnInit {
   readonly is110Mode = this.store.is110Mode;
   readonly has110Data = this.store.has110Data;
   readonly insufficientDataWarning = this.store.insufficientDataWarning;
+  readonly userNotes = this.store.userNotes;
+  readonly isDirty = this.store.isDirty;
 
   departments = [
     { id: 'A', label: '事業部A' },
@@ -136,7 +142,7 @@ export class DashboardComponent implements OnInit {
             result.department['B'].cost,
             result.department['C'].cost,
           ],
-          backgroundColor: [this.deptColorsLight.A, this.deptColorsLight.B, this.deptColorsLight.C],
+          backgroundColor: [this.deptColors.A, this.deptColors.B, this.deptColors.C],
           borderColor: '#fff',
           borderWidth: 2,
         },
@@ -164,7 +170,7 @@ export class DashboardComponent implements OnInit {
             result.department['B'].profit,
             result.department['C'].profit,
           ],
-          backgroundColor: [this.deptColorsLight.A, this.deptColorsLight.B, this.deptColorsLight.C],
+          backgroundColor: [this.deptColors.A, this.deptColors.B, this.deptColors.C],
           borderColor: '#fff',
           borderWidth: 2,
         },
@@ -184,6 +190,11 @@ export class DashboardComponent implements OnInit {
     plugins: {
       legend: {
         position: 'bottom',
+        labels: {
+          font: { size: 10 },
+          boxWidth: 10,
+          padding: 4,
+        },
       },
     },
   };
@@ -265,6 +276,14 @@ export class DashboardComponent implements OnInit {
 
   triggerRecalculation(): void {
     this.store.runSimulation();
+  }
+
+  updateUserNotes(notes: string): void {
+    this.store.updateUserNotes(notes);
+  }
+
+  clearUserNotes(): void {
+    this.store.clearUserNotes();
   }
 
   openMemberDialog(departmentId: string, departmentLabel: string): void {
@@ -368,6 +387,7 @@ export class DashboardComponent implements OnInit {
         allocation: this.store.allocation(),
         allocationResult: result,
         employeeCount: this.employeeCount(),
+        userNotes: this.userNotes() ?? '',
       };
 
       await this.firestoreService.saveScenarioSummary(scenario);

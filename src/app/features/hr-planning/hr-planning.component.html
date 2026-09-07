@@ -1,0 +1,39 @@
+<div class="hr-planning-header">
+  <div class="hr-planning-header__scenario">
+    @if (store.errorMessage()) {
+      <span class="error">{{ store.errorMessage() }}</span>
+    }
+    @if (store.scenario()) {
+      <mat-button-toggle-group
+        [value]="store.currentYear()"
+        (change)="onYearChange($event.value)"
+      >
+        @for (year of store.availableYears(); track year) {
+          <mat-button-toggle [value]="year">{{ year }}年</mat-button-toggle>
+        }
+      </mat-button-toggle-group>
+      <button mat-stroked-button (click)="advanceYear()">次年度へ進む</button>
+      <button mat-stroked-button color="warn" class="btn-remove-year" (click)="removeYear()" [disabled]="store.availableYears().length <= 1 || store.isLoading()">最新年度を削除</button>
+      @if (store.isDirty()) {
+        <button mat-raised-button color="primary" class="btn-recalculate-dirty" (click)="recalculateAll()" [disabled]="store.isLoading()">全年度再計算</button>
+      } @else {
+        <button mat-stroked-button (click)="recalculateAll()" [disabled]="store.isLoading()">全年度再計算</button>
+      }
+    }
+  </div>
+
+  @if (store.isLoading()) {
+    <div class="loading-overlay">
+      <div class="loading-content">
+        <mat-spinner [diameter]="40"></mat-spinner>
+        <p class="loading-text">計算中...</p>
+      </div>
+    </div>
+  }
+</div>
+
+<mat-divider></mat-divider>
+
+<div class="hr-planning-content">
+  <router-outlet />
+</div>

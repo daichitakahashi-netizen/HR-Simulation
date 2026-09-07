@@ -1,0 +1,69 @@
+:host {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+mat-dialog-content {
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 65vh;
+}
+
+.filter-field {
+  width: 100%;
+}
+
+.table-container {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.member-table {
+  table-layout: fixed;
+  width: 100%;
+
+  th,
+  td {
+    padding: 8px 4px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mat-column-id {
+    width: 18%;
+  }
+
+  .mat-column-sales {
+    width: 16%;
+  }
+
+  .mat-column-management {
+    width: 16%;
+  }
+
+  .mat-column-development {
+    width: 16%;
+  }
+
+  .mat-column-nurture {
+    width: 16%;
+  }
+
+  .mat-column-personnelCost {
+    width: 18%;
+  }
+}
+
+.no-results {
+  text-align: center;
+  padding: 1rem;
+  color: #666;
+}
+
+mat-dialog-actions {
+  padding: 12px 24px 16px 24px !important;
+  margin: 0 !important;
+}

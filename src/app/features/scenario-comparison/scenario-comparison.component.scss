@@ -49,10 +49,16 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  transition: box-shadow 0.3s ease;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  border: 2px solid transparent;
 
   &:hover {
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+  }
+
+  &.decided-scenario {
+    border-color: #1976d2;
+    box-shadow: 0 0 12px rgba(25, 118, 210, 0.2);
   }
 
   mat-card-header {
@@ -164,12 +170,49 @@
   }
 }
 
+.memo-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .memo-field {
   width: 100%;
 }
 
 .full-width {
   width: 100%;
+}
+
+.title-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+
+  mat-card-title {
+    margin: 0;
+    flex: 1;
+  }
+}
+
+.decided-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background-color: #c8e6c9;
+  color: #1b5e20;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+
+  mat-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+  }
 }
 
 .decide-button,

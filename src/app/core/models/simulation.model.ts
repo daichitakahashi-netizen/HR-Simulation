@@ -10,6 +10,8 @@ export interface EmployeeAbilities {
 export interface Employee extends EmployeeAbilities {
   id: string;
   personnelCost: number; // 人件費 (1-20)
+  preference?: 'A' | 'B' | 'C' | 'NONE'; // 配属希望（デフォルト 'NONE'）
+  evaluationScore?: 1 | 2 | 3 | 4 | 5; // 評価スコア（デフォルト 3）
 }
 
 // Department types
@@ -96,4 +98,7 @@ export interface SimulationParams {
 }
 
 // Department objective
-export type DepartmentObjective = 'totalRevenue' | 'departmentAProfitMaximize' | 'departmentBRevenueMaximize' | 'departmentCRevenueMaximize';
+export type DepartmentObjective = 'totalRevenue' | 'departmentAProfitMaximize' | 'departmentBRevenueMaximize' | 'departmentCRevenueMaximize' | 'employeeSatisfaction';
+
+// Secondary axis used as the tie-break (second lexicographic objective) for 'employeeSatisfaction'
+export type SatisfactionSecondaryObjective = 'totalRevenue' | 'totalProfit';

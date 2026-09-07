@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, combineLatest, distinctUntilChanged, of, Observable, forkJoin, Subject, merge } from 'rxjs';
-import { tap, switchMap, concatMap, map, finalize, withLatestFrom } from 'rxjs/operators';
+import { tap, switchMap, concatMap, map, finalize, withLatestFrom, debounceTime } from 'rxjs/operators';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { SimulationEngineService } from './simulation-engine.service';
 import { CsvParserService } from './csv-parser.service';
@@ -11,6 +11,22 @@ import {
   DepartmentObjective,
   AllocationMap,
 } from '../models/simulation.model';
+import { ScenarioSummary } from '../models/scenario.model';
+
+const ADDITIONAL_10_EMPLOYEES_STORAGE_KEY = 'uploaded_additional_10_employees';
+const ADDITIONAL_FILE_NAME_STORAGE_KEY = 'uploaded_additional_file_name';
+
+// アプリ起動（ブラウザリロード／サーバー再起動）につき一度だけ、追加10名データのSessionStorageを
+// 破棄するためのモジュールスコープ・フラグ。単年・経年・データ管理のどの画面が最初に開かれても、
+// 同一ページロード内で最初に呼ばれた側がクリアを実行し、以降の呼び出しは何もしない
+// （SPA内遷移でユーザーが直前にアップロードした正規データを誤って消さないため）。
+let hasPerformedBootSessionClear = false;
+export function clearAdditionalEmployeesOnBootOnce(): void {
+  if (hasPerformedBootSessionClear) return;
+  hasPerformedBootSessionClear = true;
+  sessionStorage.removeItem(ADDITIONAL_10_EMPLOYEES_STORAGE_KEY);
+  sessionStorage.removeItem(ADDITIONAL_FILE_NAME_STORAGE_KEY);
+}
 
 @Injectable({
   providedIn: 'root',
@@ -41,13 +57,17 @@ export class SimulationStoreService {
   readonly is110Mode = signal<boolean>(false);
   readonly has110Data = signal<boolean>(false);
   readonly insufficientDataWarning = signal<string>('');
+  readonly uploadedFileName = signal<string | null>(null);
+  readonly userNotes = signal<string>('');
+  readonly isDirty = signal<boolean>(false);
 
-  private simulationWorker: Worker | null = null;
+  private worker100: Worker | null = null;
+  private worker110: Worker | null = null;
   private snackBar = inject(MatSnackBar);
   private hasCalculatedResults = false;
   private isManualRecalculation = false;
   private csvDataCached = false;
-  private simulationCache = new Map<string, { result100: AllocationResult; result110: AllocationResult | null }>();
+  private simulationCache = new Map<string, { result100: AllocationResult; result110: AllocationResult | null; reasonText100: string; reasonText110: string }>();
   private currentRequestId: number = 0;
   private recalculateTrigger$ = new Subject<void>();
 
@@ -63,7 +83,11 @@ export class SimulationStoreService {
   private initializeWorker(): void {
     if (typeof Worker !== 'undefined') {
       try {
-        this.simulationWorker = new Worker(
+        this.worker100 = new Worker(
+          new URL('../../workers/simulation.worker', import.meta.url),
+          { type: 'module' }
+        );
+        this.worker110 = new Worker(
           new URL('../../workers/simulation.worker', import.meta.url),
           { type: 'module' }
         );
@@ -77,6 +101,7 @@ export class SimulationStoreService {
     // Create a trigger for locked employees changes
     const lockedEmployeesTrigger$ = new BehaviorSubject<Record<string, string>>({});
     let previousEmployeeIds: string[] = [];
+    let previousBase100EmployeeIds: string[] = [];
     let previousObjective: DepartmentObjective | null = null;
     let previousLockedEmployees: Record<string, string> = {};
 
@@ -87,9 +112,10 @@ export class SimulationStoreService {
       merge(of(null), this.recalculateTrigger$),
     ])
       .pipe(
+        debounceTime(50),
         distinctUntilChanged((prev, curr) => {
-          // Always pass through when recalculate trigger fires
-          if (curr[3] !== undefined && curr[3] !== null) {
+          // Always pass through when manual recalculation is triggered
+          if (this.isManualRecalculation) {
             return false;
           }
           return JSON.stringify(prev.slice(0, 3)) === JSON.stringify(curr.slice(0, 3));
@@ -114,7 +140,16 @@ export class SimulationStoreService {
             previousEmployeeIds.length === 0 ||
             JSON.stringify(previousEmployeeIds) !== JSON.stringify(currentEmployeeIds);
 
+          // Detect whether only the additional 10 employees (101〜110) changed while the
+          // standard 100-employee base data stayed identical (e.g. 追加10名CSVの登録・更新)
+          const currentBase100EmployeeIds = employees.slice(0, 100).map(e => e.id).sort();
+          const base100DataChanged =
+            previousBase100EmployeeIds.length === 0 ||
+            JSON.stringify(previousBase100EmployeeIds) !== JSON.stringify(currentBase100EmployeeIds);
+          const onlyAdditionalEmployeesChanged = employeeDataChanged && !base100DataChanged;
+
           previousEmployeeIds = currentEmployeeIds;
+          previousBase100EmployeeIds = currentBase100EmployeeIds;
 
           // Detect if objective or locked employees have changed
           const currentLockedEmployees = this.lockedEmployees();
@@ -137,18 +172,24 @@ export class SimulationStoreService {
 
           // Trigger new simulation for manual recalc or new employee data
           if (employeeDataChanged) {
-            console.log('[Store] Employee data changed, resetting calculation cache and Map cache');
-            this.hasCalculatedResults = false;
-            this.simulationResult100$.next(null);
-            this.simulationResult110$.next(null);
-            this.simulationCache.clear();
+            if (onlyAdditionalEmployeesChanged) {
+              console.log('[Store] Only additional 10-employee data changed, keeping 100-employee result/cache and clearing 110-employee result/cache only');
+              this.simulationResult110$.next(null);
+              this.simulationCache.clear();
+            } else {
+              console.log('[Store] Employee data changed, resetting calculation cache and Map cache');
+              this.hasCalculatedResults = false;
+              this.simulationResult100$.next(null);
+              this.simulationResult110$.next(null);
+              this.simulationCache.clear();
+            }
           }
 
           this.isManualRecalculation = false;
           console.log('[Store] Starting dual simulation');
           this.isLoading.set(true);
 
-          return this.runDualSimulation(employees, objective, currentLockedEmployees);
+          return this.runDualSimulation(employees, objective, currentLockedEmployees, onlyAdditionalEmployeesChanged);
         }),
         tap((results) => {
           console.log('[Store] Simulation results received:', results ? 'success' : 'null');
@@ -171,15 +212,30 @@ export class SimulationStoreService {
         this.is110Mode.set(is110Mode);
         const result100 = this.simulationResult100$.value;
         const result110 = this.simulationResult110$.value;
+        const employees = this.employees$.value;
 
         // Check if 110-mode data is available
         const has110Data = result110 !== null;
         this.has110Data.set(has110Data);
 
-        // If switching to 110-mode and 110-mode result is not yet available, show loading state
-        if (is110Mode && result110 === null) {
-          console.log('[Store] Switched to 110-mode but calculation not completed, showing loading state');
-          this.isLoading.set(true);
+        // Smart Toggle（フェイルセーフ）: データ不足時は計算をスキップし即座に100名結果を維持
+        if (is110Mode && employees.length < 110 && result110 === null) {
+          console.log('[Store] Switched to 110-mode but 110-employee data not available, activating failsafe');
+          this.insufficientDataWarning.set('※110名用人事データ（追加10名）が読み込まれていないため、100名でのシミュレーション結果を表示しています');
+          this.snackBar.open('追加10名分のデータが未ロードです', '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
+          if (result100) {
+            this.simulationResult.set(result100);
+            this.allocation.set(result100.allocation);
+          }
+          this.isLoading.set(false);
+          return;
+        }
+
+        // オンデマンド計算: 110名モードに切り替わり、110名結果がまだキャッシュに無い場合のみ計算を起動
+        if (is110Mode && result110 === null && employees.length >= 110) {
+          console.log('[Store] Switched to 110-mode, running on-demand 110-employee calculation');
+          this.runOnDemand110Calculation();
+          return;
         }
 
         this.updateDisplayState();
@@ -193,16 +249,20 @@ export class SimulationStoreService {
   private runDualSimulation(
     employees: Employee[],
     objective: DepartmentObjective,
-    lockedEmployees: Record<string, string>
+    lockedEmployees: Record<string, string>,
+    skip100Calculation: boolean = false
   ): Observable<{ result100: AllocationResult; result110: AllocationResult | null } | null> {
     const cacheKey = this.generateCacheKey(objective, lockedEmployees);
     const result100RequestId = ++this.currentRequestId;
     const result110RequestId = ++this.currentRequestId;
 
-    if (this.simulationCache.has(cacheKey)) {
+    if (!skip100Calculation && this.simulationCache.has(cacheKey)) {
       console.log('[Store] Cache hit! Restoring results from Map cache (0ms)');
       const cachedResults = this.simulationCache.get(cacheKey)!;
       const results = { result100: cachedResults.result100, result110: cachedResults.result110 };
+      this.reasonText100.set(cachedResults.reasonText100);
+      this.reasonText110.set(cachedResults.reasonText110);
+      this.updateDisplayReasonText();
 
       return of(results).pipe(
         finalize(() => {
@@ -212,35 +272,56 @@ export class SimulationStoreService {
       );
     }
 
+    // Delete only the cache entry for this specific objective/locked-employee combination
+    if (this.isManualRecalculation) {
+      this.simulationCache.delete(cacheKey);
+      console.log('[Store] Cleared cache for current condition (objective/locked-employees)');
+    }
+
     console.log('[Store] Starting dual simulation: running 100-employee and 110-employee in parallel');
     console.log('[Store] 100-employee Request ID:', result100RequestId);
     console.log('[Store] 110-employee Request ID:', result110RequestId);
 
-    const result100$ = this.runSimulationWithHybridEngine(
-      employees.slice(0, 100),
-      objective,
-      100,
-      lockedEmployees,
-      result100RequestId
-    ).pipe(
-      tap((result100) => {
-        if (result100) {
-          console.log('[Store] 100-employee simulation completed.');
-          this.simulationResult100$.next(result100);
-          // 100名モードの場合のみローディング解除
-          if (!this.is110Mode()) {
+    let result100$: Observable<AllocationResult | null>;
+    if (skip100Calculation && this.simulationResult100$.value) {
+      console.log('[Store] Skipping 100-employee recalculation (only additional employees changed), reusing existing result');
+      const existingResult100 = this.simulationResult100$.value;
+      result100$ = of(existingResult100).pipe(
+        tap((result100) => {
+          if (result100 && !this.is110Mode()) {
             this.isLoading.set(false);
           }
-          this.updateDisplayState();
-        }
-      })
-    );
+        })
+      );
+    } else {
+      result100$ = this.runSimulationWithHybridEngine(
+        this.worker100,
+        employees.slice(0, 100),
+        objective,
+        100,
+        lockedEmployees,
+        result100RequestId
+      ).pipe(
+        tap((result100) => {
+          if (result100) {
+            console.log('[Store] 100-employee simulation completed.');
+            this.simulationResult100$.next(result100);
+            // 100名モードの場合のみローディング解除
+            if (!this.is110Mode()) {
+              this.isLoading.set(false);
+            }
+            this.updateDisplayState();
+          }
+        })
+      );
+    }
 
     let result110$: Observable<AllocationResult | null>;
-    if (employees.length >= 110) {
-      console.log('[Store] 110-employee data available, starting parallel calculation...');
+    if (this.is110Mode() && employees.length >= 110) {
+      console.log('[Store] 110-mode active, starting parallel 110-employee calculation...');
 
       result110$ = this.runSimulationWithHybridEngine(
+        this.worker110,
         employees,
         objective,
         110,
@@ -281,19 +362,115 @@ export class SimulationStoreService {
         }
 
         console.log('[Store] All parallel simulations completed. Caching results...');
-        this.simulationCache.set(cacheKey, { result100, result110 });
+        this.simulationCache.set(cacheKey, {
+          result100,
+          result110,
+          reasonText100: this.reasonText100(),
+          reasonText110: this.reasonText110(),
+        });
         console.log('[Store] Results cached in Map for future use');
 
+        // Verify 110-employee difference
+        if (result110) {
+          this.verifyDifference(result100, result110, objective);
+        }
+
         return { result100, result110 };
-      }),
-      finalize(() => {
-        console.log('[Store] Dual simulation finalized - setting isLoading to false');
-        this.isLoading.set(false);
       })
     );
   }
 
+  private runOnDemand110Calculation(): void {
+    const employees = this.employees$.value;
+    if (employees.length < 110) {
+      this.isLoading.set(false);
+      return;
+    }
+
+    const objective = this.selectedObjective() as DepartmentObjective;
+    const lockedEmployees = this.lockedEmployees();
+    const cacheKey = this.generateCacheKey(objective, lockedEmployees);
+
+    const cached = this.simulationCache.get(cacheKey);
+    if (cached && cached.result110 !== null) {
+      console.log('[Store] 110-employee cache hit, restoring from Map cache (0ms)');
+      this.simulationResult110$.next(cached.result110);
+      this.reasonText110.set(cached.reasonText110);
+      this.has110Data.set(true);
+      this.updateDisplayReasonText();
+      this.updateDisplayState();
+      this.isLoading.set(false);
+      return;
+    }
+
+    console.log('[Store] Starting on-demand 110-employee calculation');
+    this.isLoading.set(true);
+    const requestId = ++this.currentRequestId;
+
+    this.runSimulationWithHybridEngine(
+      this.worker110,
+      employees,
+      objective,
+      110,
+      lockedEmployees,
+      requestId
+    ).subscribe((result110) => {
+      if (result110) {
+        console.log('[Store] On-demand 110-employee simulation completed.');
+        this.simulationResult110$.next(result110);
+        this.has110Data.set(true);
+
+        const existingCache = this.simulationCache.get(cacheKey);
+        const result100 = existingCache?.result100 ?? this.simulationResult100$.value;
+        if (result100) {
+          this.simulationCache.set(cacheKey, {
+            result100,
+            result110,
+            reasonText100: existingCache?.reasonText100 ?? this.reasonText100(),
+            reasonText110: this.reasonText110(),
+          });
+        }
+
+        this.verifyDifference(result100 ?? result110, result110, objective);
+        this.updateDisplayState();
+      }
+      this.isLoading.set(false);
+    });
+  }
+
+  private verifyDifference(result100: AllocationResult, result110: AllocationResult, objective: DepartmentObjective): void {
+    const revenueDiff = result110.summary.totalRevenue - result100.summary.totalRevenue;
+    const profitDiff = result110.summary.totalProfit - result100.summary.totalProfit;
+    const revenueDiffStr = revenueDiff >= 0 ? `+${revenueDiff.toFixed(2)}` : revenueDiff.toFixed(2);
+    const profitDiffStr = profitDiff >= 0 ? `+${profitDiff.toFixed(2)}` : profitDiff.toFixed(2);
+
+    const objName = this.getObjectiveJapaneseName(objective);
+    console.log(
+      `[Verification] 100名 vs 110名比較 (${objName}): ` +
+      `売上Δ=${revenueDiffStr}億円, ` +
+      `利益Δ=${profitDiffStr}億円, ` +
+      `100名結果(A=${result100.allocation['A']}, B=${result100.allocation['B']}, C=${result100.allocation['C']}), ` +
+      `110名結果(A=${result110.allocation['A']}, B=${result110.allocation['B']}, C=${result110.allocation['C']})`
+    );
+
+    // Verify department-level differences
+    for (const dept of ['A', 'B', 'C']) {
+      const d100 = result100.department[dept];
+      const d110 = result110.department[dept];
+      const revenueDeptDiff = d110.finalRevenue - d100.finalRevenue;
+      const profitDeptDiff = d110.profit - d100.profit;
+      const revenueDeptDiffStr = revenueDeptDiff >= 0 ? `+${revenueDeptDiff.toFixed(2)}` : revenueDeptDiff.toFixed(2);
+      const profitDeptDiffStr = profitDeptDiff >= 0 ? `+${profitDeptDiff.toFixed(2)}` : profitDeptDiff.toFixed(2);
+
+      console.log(
+        `[Verification] 部門${dept}差分: 売上Δ=${revenueDeptDiffStr}億円, 利益Δ=${profitDeptDiffStr}億円, ` +
+        `配置人数100名時=${d100.allocatedEmployees}名→110名時=${d110.allocatedEmployees}名`
+      );
+    }
+  }
+
   private runSimulationWithHybridEngine(
+    targetWorker: Worker | null,
     employees: Employee[],
     objective: DepartmentObjective,
     totalEmployees: number,
@@ -301,7 +478,9 @@ export class SimulationStoreService {
     requestId: number
   ): Observable<AllocationResult | null> {
     return new Observable((observer) => {
-      if (!this.simulationWorker) {
+      const worker = targetWorker;
+
+      if (!worker) {
         console.error('[Store] Web Worker not available and no fallback calculation available');
         this.snackBar.open('Web Workerが利用できません', '閉じる', { duration: 5000, panelClass: ['error-snackbar'] });
         this.isLoading.set(false);
@@ -315,11 +494,11 @@ export class SimulationStoreService {
       let handleError: ((error: ErrorEvent | any) => void) | null = null;
 
       const cleanup = () => {
-        if (handleMessage && this.simulationWorker) {
-          this.simulationWorker.removeEventListener('message', handleMessage);
+        if (handleMessage && worker) {
+          worker.removeEventListener('message', handleMessage);
         }
-        if (handleError && this.simulationWorker) {
-          this.simulationWorker.removeEventListener('error', handleError);
+        if (handleError && worker) {
+          worker.removeEventListener('error', handleError);
         }
         handleMessage = null;
         handleError = null;
@@ -366,14 +545,6 @@ export class SimulationStoreService {
 
             this.allocatedEmployeeIds.set(allocatedIds);
 
-            completed = true;
-            this.hasCalculatedResults = true;
-            console.log('[Store] Emitting result via observer.next()');
-            observer.next(result);
-            observer.complete();
-
-            cleanup();
-
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
             if (totalEmployees === 100) {
@@ -383,6 +554,14 @@ export class SimulationStoreService {
             }
             this.updateDisplayReasonText();
             console.log('[Store] Text generation completed');
+
+            completed = true;
+            this.hasCalculatedResults = true;
+            console.log('[Store] Emitting result via observer.next()');
+            observer.next(result);
+            observer.complete();
+
+            cleanup();
             return;
           }
 
@@ -403,14 +582,6 @@ export class SimulationStoreService {
 
             this.allocatedEmployeeIds.set(allocatedIds);
 
-            completed = true;
-            this.hasCalculatedResults = true;
-            console.log('[Store] Emitting result via observer.next()');
-            observer.next(result);
-            observer.complete();
-
-            cleanup();
-
             const reasoningText = this.generateReasoningText(result, objective, employees, allocatedIds, totalEmployees);
             this.reasoningText$.next(reasoningText);
             if (totalEmployees === 100) {
@@ -420,6 +591,14 @@ export class SimulationStoreService {
             }
             this.updateDisplayReasonText();
             console.log('[Store] Text generation completed');
+
+            completed = true;
+            this.hasCalculatedResults = true;
+            console.log('[Store] Emitting result via observer.next()');
+            observer.next(result);
+            observer.complete();
+
+            cleanup();
           }
         } catch (error) {
           console.error('[Store] Error processing worker message:', error);
@@ -446,10 +625,10 @@ export class SimulationStoreService {
       };
 
       console.log('[Store] Posting message to worker (totalEmployees=' + totalEmployees + ', requestId=' + requestId + ')');
-      this.simulationWorker.addEventListener('message', handleMessage);
-      this.simulationWorker.addEventListener('error', handleError);
+      worker.addEventListener('message', handleMessage);
+      worker.addEventListener('error', handleError);
 
-      this.simulationWorker.postMessage({
+      worker.postMessage({
         employees,
         objective,
         totalEmployees,
@@ -480,10 +659,14 @@ export class SimulationStoreService {
   runSimulation(): void {
     console.log('[Store] Manual recalculation initiated');
     this.isLoading.set(true);
+    this.isDirty.set(false);
+
+    // Apply pending objective change if isDirty was true
+    const selectedObj = this.selectedObjective();
+    this.currentObjective$.next(selectedObj as DepartmentObjective);
+
     this.isManualRecalculation = true;
     this.hasCalculatedResults = false;
-    this.simulationCache.clear();
-    console.log('[Store] Cache cleared for manual recalculation');
     this.recalculateTrigger$.next();
   }
 
@@ -497,6 +680,10 @@ export class SimulationStoreService {
     this.isLoading.set(true);
     console.log('[Store] Loading initial CSV data');
 
+    // アプリ起動時・リロード時は過去セッションの追加10名データを完全に破棄し、
+    // 単年・経年の両画面で「追加10名未読み込み」状態に確実に同期させる。
+    clearAdditionalEmployeesOnBootOnce();
+
     this.httpClient.get('/assets/human_resources_100.csv', {
       responseType: 'text',
     }).subscribe({
@@ -506,8 +693,9 @@ export class SimulationStoreService {
         console.log('[Store] CSV parsed, employee count:', parsedEmployees.length);
 
         this.csvDataCached = true;
-        // Always load 100-employee base data; later use runDualSimulation for both 100 and 110
+        // 初期ロード時は常に100名のみでスタートし、SessionStorageの追加10名データは読み込まない。
         // Note: isLoading state will be managed by reactive flow (setupReactiveDataFlow)
+        this.uploadedFileName.set(null);
         this.employees$.next(parsedEmployees);
       },
       error: (error) => {
@@ -537,19 +725,37 @@ export class SimulationStoreService {
     this.employees$.next(employees);
   }
 
-  uploadEmployeesCsv(parsedEmployees: Employee[]): void {
+  // 単年側でユーザーがアップロード済みの追加10名データ（101〜110番相当）を取得する。
+  // 100名+10名の結合（110名）が完了していない場合はnullを返す。
+  getUploadedAdditionalEmployees(): Employee[] | null {
+    const employees = this.employees$.value;
+    if (employees.length !== 110) return null;
+    return employees.slice(100);
+  }
+
+  uploadEmployeesCsv(parsedEmployees: Employee[], fileName?: string): void {
     const count = parsedEmployees.length;
     const currentEmployees = this.employees$.value;
 
     if (count === 10 && currentEmployees.length === 100) {
       const mergedEmployees = this.mergeEmployees(currentEmployees, parsedEmployees);
       this.employees$.next(mergedEmployees);
+      this.saveAdditionalEmployeesToStorage(mergedEmployees.slice(100));
+      if (fileName) {
+        this.uploadedFileName.set(fileName);
+      }
       this.snackBar.open(`社員データを結合しました（100名 + 10名 = 110名）`, '✓', { duration: 5000 });
       return;
     }
 
     if (count === 100 || count === 110) {
       this.employees$.next(parsedEmployees);
+      this.uploadedFileName.set(null);
+      if (count === 110) {
+        this.saveAdditionalEmployeesToStorage(parsedEmployees.slice(100));
+      } else {
+        sessionStorage.removeItem(ADDITIONAL_10_EMPLOYEES_STORAGE_KEY);
+      }
       this.snackBar.open(`${count}名分の社員データをアップロードしました`, '✓', { duration: 5000 });
       return;
     }
@@ -558,6 +764,29 @@ export class SimulationStoreService {
       duration: 5000,
       panelClass: ['error-snackbar']
     });
+  }
+
+  removeAdditionalData(): void {
+    const currentEmployees = this.employees$.value;
+    if (currentEmployees.length === 110) {
+      const resetEmployees = currentEmployees.slice(0, 100);
+      this.employees$.next(resetEmployees);
+      this.uploadedFileName.set(null);
+      sessionStorage.removeItem(ADDITIONAL_10_EMPLOYEES_STORAGE_KEY);
+      this.simulationCache.clear();
+      this.hasCalculatedResults = false;
+      this.isManualRecalculation = true;
+      this.recalculateTrigger$.next();
+      this.snackBar.open('追加データを削除し、初期100名状態にリセットしました', '✓', { duration: 5000 });
+    }
+  }
+
+  private saveAdditionalEmployeesToStorage(additionalEmployees: Employee[]): void {
+    try {
+      sessionStorage.setItem(ADDITIONAL_10_EMPLOYEES_STORAGE_KEY, JSON.stringify(additionalEmployees));
+    } catch (error) {
+      console.error('[Store] Failed to save additional 10 employees to SessionStorage:', error);
+    }
   }
 
   private mergeEmployees(existing: Employee[], additional: Employee[]): Employee[] {
@@ -586,8 +815,34 @@ export class SimulationStoreService {
 
   updateObjective(objective: DepartmentObjective | string): void {
     const obj = objective as DepartmentObjective;
-    this.currentObjective$.next(obj);
+    const cacheKey = this.generateCacheKey(obj, this.lockedEmployees());
+
     this.selectedObjective.set(obj);
+
+    if (this.simulationCache.has(cacheKey)) {
+      console.log('[Store] Cache hit for objective change! Restoring results...');
+      const cachedResults = this.simulationCache.get(cacheKey)!;
+      const { result100, result110, reasonText100, reasonText110 } = cachedResults;
+
+      this.simulationResult100$.next(result100);
+      this.simulationResult110$.next(result110);
+      this.has110Data.set(result110 !== null);
+      this.reasonText100.set(reasonText100);
+      this.reasonText110.set(reasonText110);
+
+      this.updateDisplayState();
+      this.updateDisplayReasonText();
+      this.isDirty.set(false);
+      console.log('[Store] Objective changed with cached results restored');
+
+      // 110名モード中に該当キャッシュへ110名結果が無い場合はオンデマンドで計算
+      if (this.is110Mode() && result110 === null && this.employees$.value.length >= 110) {
+        this.runOnDemand110Calculation();
+      }
+    } else {
+      console.log('[Store] No cache for this objective/locked-employee combination, marking as dirty');
+      this.isDirty.set(true);
+    }
   }
 
   getObjectiveJapaneseName(objective: string): string {
@@ -663,16 +918,11 @@ export class SimulationStoreService {
       return;
     }
 
+    // Signal update without triggering recalculation
     this.lockedEmployees.set(locked);
+    this.isDirty.set(true);
 
-    // Trigger recalculation via locked employees change (manual recalc required)
-    this.isManualRecalculation = true;
-    const lockedEmployeesTrigger$ = (this as any).lockedEmployeesTrigger$;
-    if (lockedEmployeesTrigger$) {
-      lockedEmployeesTrigger$.next(locked);
-    }
-
-    this.snackBar.open('ロック設定を更新しました', '✓', { duration: 3000 });
+    this.snackBar.open('ロック設定を更新しました。「再計算を実行」を押して結果を反映してください', '✓', { duration: 5000 });
   }
 
   private validateLockConstraint(lockedEmployees: Record<string, string>): string | null {
@@ -748,6 +998,44 @@ export class SimulationStoreService {
       this.reasonText.set(reasonText110 || reasonText100);
     } else {
       this.reasonText.set(reasonText100);
+    }
+  }
+
+  updateUserNotes(notes: string): void {
+    this.userNotes.set(notes);
+  }
+
+  clearUserNotes(): void {
+    this.userNotes.set('');
+  }
+
+  applyScenario(scenario: ScenarioSummary): void {
+    // Apply the scenario's allocation result to the store's active state
+    if (scenario.allocationResult) {
+      this.simulationResult.set(scenario.allocationResult);
+      this.allocation.set(scenario.allocationResult.allocation);
+    }
+
+    // Apply objective
+    if (scenario.objective) {
+      this.selectedObjective.set(scenario.objective);
+      this.currentObjective$.next(scenario.objective as DepartmentObjective);
+    }
+
+    // Apply user notes
+    if (scenario.userNotes) {
+      this.userNotes.set(scenario.userNotes);
+    }
+
+    // Apply reasoning text
+    if (scenario.decisionReason) {
+      this.reasonText.set(scenario.decisionReason);
+      this.reasoningText$.next(scenario.decisionReason);
+    }
+
+    // Apply allocated employee IDs
+    if (scenario.allocatedEmployeeIds) {
+      this.allocatedEmployeeIds.set(scenario.allocatedEmployeeIds);
     }
   }
 

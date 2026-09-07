@@ -305,6 +305,7 @@ export class SimulationEngineService {
         pattern,
         contributions,
         totalEmployees,
+        objective,
         lockedEmployees
       );
 
@@ -317,9 +318,8 @@ export class SimulationEngineService {
         bestScore = score;
         bestResult = result;
       } else if (Math.abs(score - bestScore) < 1e-8 && bestResult) {
-        const currentA = result.department['A'].finalRevenue;
-        const bestA = bestResult.department['A'].finalRevenue;
-        if (currentA > bestA) {
+        // タイブレーク: 主目的の値が同等の場合、全社売上が最大となるパターンを優先選出する
+        if (result.summary.totalRevenue > bestResult.summary.totalRevenue) {
           bestScore = score;
           bestResult = result;
         }
@@ -370,6 +370,7 @@ export class SimulationEngineService {
     pattern: { A: number; B: number; C: number },
     contributions: Record<string, number[]>,
     totalEmployees: number,
+    objective: DepartmentObjective,
     lockedEmployees?: Record<string, string>
   ): { matrix: number[][]; deptMapping: string[] } {
     const n = employees.length;
@@ -414,10 +415,27 @@ export class SimulationEngineService {
         const marginalContribution =
           config.baseRevenue * config.growthRate * (contribution / 100) * corrections.shortage * corrections.surplus;
 
+        // A事業部利益最大化時は、A事業部の純利益貢献度（限界貢献額－人件費）で評価する
+        let marginalValue = marginalContribution;
+        if (objective === 'departmentAProfitMaximize') {
+          if (dept === 'A') {
+            const empCost = (emp.personnelCost * this.constraints.PERSONNEL_COST_MULTIPLIER) / 100;
+            marginalValue = marginalContribution - empCost;
+          } else {
+            // 主目的（A事業部）以外は微小重みでタイブレークのみに寄与させ、
+            // 他事業部の売上貢献額がハンガリー法で過剰評価されないようにする
+            marginalValue = marginalContribution * 1e-6;
+          }
+        } else if (objective === 'departmentBRevenueMaximize' && dept !== 'B') {
+          marginalValue = marginalContribution * 1e-6;
+        } else if (objective === 'departmentCRevenueMaximize' && dept !== 'C') {
+          marginalValue = marginalContribution * 1e-6;
+        }
+
         if (lockedDept && lockedDept !== dept) {
           row.push(1000000);
         } else {
-          row.push(-marginalContribution);
+          row.push(-marginalValue);
         }
       }
       matrix.push(row);

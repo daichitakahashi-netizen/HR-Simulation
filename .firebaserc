@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "summer003-7e5bc"
+  },
+  "targets": {
+    "summer003-7e5bc": {
+      "hosting": {
+        "hr-simulation": [
+          "hr-simulation"
+        ]
+      }
+    }
+  }
+}

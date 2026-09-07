@@ -15,16 +15,13 @@
     <!-- Purpose Selection -->
     <div class="objective-section">
       <h3 class="section-title">目的選択</h3>
-      <mat-form-field appearance="outline" class="objective-field">
-        <mat-label>目的</mat-label>
-        <mat-select [value]="selectedObjective()" (selectionChange)="onObjectiveChange($event.value)">
-          @for (obj of objectives; track obj.value) {
-            <mat-option [value]="obj.value">
-              {{ obj.label }}
-            </mat-option>
-          }
-        </mat-select>
-      </mat-form-field>
+      <mat-radio-group [value]="selectedObjective()" (change)="onObjectiveChange($event.value)" class="objective-radio-group">
+        @for (obj of objectives; track obj.value) {
+          <mat-radio-button [value]="obj.value" color="primary">
+            {{ obj.label }}
+          </mat-radio-button>
+        }
+      </mat-radio-group>
 
       <!-- Lock Status Indicator -->
       @if (hasLockedEmployees()) {
@@ -36,13 +33,14 @@
       }
 
       <!-- Recalculation Button -->
-      <div style="margin-top: 0.75rem;">
+      <div style="margin-top: 0.3rem;">
         <button
           mat-raised-button
-          color="accent"
+          [color]="isDirty() ? 'primary' : 'accent'"
+          [class.is-dirty]="isDirty()"
           (click)="triggerRecalculation()"
           [disabled]="isLoading()"
-          style="width: 100%;">
+          style="width: 100%; font-size: 0.8rem; padding: 0.3rem 1rem;">
           @if (isLoading()) {
             計算中...
           } @else {
@@ -83,6 +81,34 @@
         <p class="reason-content">
           {{ reasonText() }}
         </p>
+
+        <!-- User Notes Section -->
+        <div class="user-notes-section">
+          <h4>人事担当者メモ・補足理由</h4>
+          <mat-form-field appearance="outline" class="notes-form-field">
+            <mat-label>補足理由・所感を入力</mat-label>
+            <textarea
+              #notesTextarea
+              matInput
+              cdkTextareaAutosize
+              cdkAutosizeMinRows="2"
+              cdkAutosizeMaxRows="5"
+              [value]="userNotes()"
+              (input)="updateUserNotes(notesTextarea.value)"
+              placeholder="配置理由や現場の補足所感を入力（条件変更時も保持されます）">
+            </textarea>
+            @if (userNotes()) {
+              <button
+                mat-icon-button
+                matSuffix
+                (click)="clearUserNotes()"
+                type="button"
+                aria-label="Clear notes">
+                <mat-icon>clear</mat-icon>
+              </button>
+            }
+          </mat-form-field>
+        </div>
       </mat-card-content>
     </mat-card>
   </div>
@@ -91,7 +117,7 @@
   <div class="right-panel">
     <!-- Company KPI Summary -->
     <div class="kpi-summary">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
         <h2 style="margin: 0;">全社KPIサマリー</h2>
         <button
           mat-raised-button
@@ -247,7 +273,7 @@
                   </div>
                   <div class="info-row">
                     <span>充足率:</span>
-                    <strong>{{ isValidNumber(deptResult.fulfillmentRate) ? (deptResult.fulfillmentRate | number: '0.0-2') : '—' }}</strong>
+                    <strong>{{ isValidNumber(deptResult.fulfillmentRate) ? (deptResult.fulfillmentRate | number: '1.2-2') : '—' }}</strong>
                   </div>
                   <div class="info-row">
                     <span>最終売上:</span>

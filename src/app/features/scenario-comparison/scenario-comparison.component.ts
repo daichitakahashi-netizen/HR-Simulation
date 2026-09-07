@@ -1,11 +1,11 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { FormsModule } from '@angular/forms';
 import { SimulationStoreService } from '../../core/services/simulation-store.service';
 import { FirestoreService } from '../../core/services/firestore.service';
@@ -21,7 +21,6 @@ import { ScenarioSummary } from '../../core/models/scenario.model';
     MatFormFieldModule,
     MatInputModule,
     MatIconModule,
-    MatProgressSpinnerModule,
     FormsModule,
   ],
   templateUrl: './scenario-comparison.component.html',
@@ -29,12 +28,11 @@ import { ScenarioSummary } from '../../core/models/scenario.model';
 })
 export class ScenarioComparisonComponent implements OnInit {
   scenarios = signal<ScenarioSummary[]>([]);
-  isSaving = signal(false);
   reasonMemos = signal<Record<string, string>>({});
+  userNotesMemos = signal<Record<string, string>>({});
+  decidedScenarioId = signal<string | null>(null);
 
-  readonly simResult = computed(() => this.simulationStore.simulationResult());
-  readonly objective = computed(() => this.simulationStore.selectedObjective());
-  readonly reasonText = computed(() => this.simulationStore.reasonText());
+  private snackBar = inject(MatSnackBar);
 
   constructor(
     private simulationStore: SimulationStoreService,
@@ -54,58 +52,6 @@ export class ScenarioComparisonComponent implements OnInit {
     }
   }
 
-  async saveCurrentAsScenario(): Promise<void> {
-    const result = this.simResult();
-    if (!result) {
-      return;
-    }
-
-    this.isSaving.set(true);
-    try {
-      const scenario: ScenarioSummary = {
-        objective: this.objective(),
-        totalRevenue: result.summary.totalRevenue,
-        totalCost: result.summary.totalCost,
-        totalProfit: result.summary.totalProfit,
-        departmentSummaries: {
-          A: {
-            allocatedEmployees: result.department['A'].allocatedEmployees,
-            departmentCapability: result.department['A'].departmentCapability,
-            fulfillmentRate: result.department['A'].fulfillmentRate,
-            finalRevenue: result.department['A'].finalRevenue,
-            cost: result.department['A'].cost,
-            profit: result.department['A'].profit,
-          },
-          B: {
-            allocatedEmployees: result.department['B'].allocatedEmployees,
-            departmentCapability: result.department['B'].departmentCapability,
-            fulfillmentRate: result.department['B'].fulfillmentRate,
-            finalRevenue: result.department['B'].finalRevenue,
-            cost: result.department['B'].cost,
-            profit: result.department['B'].profit,
-          },
-          C: {
-            allocatedEmployees: result.department['C'].allocatedEmployees,
-            departmentCapability: result.department['C'].departmentCapability,
-            fulfillmentRate: result.department['C'].fulfillmentRate,
-            finalRevenue: result.department['C'].finalRevenue,
-            cost: result.department['C'].cost,
-            profit: result.department['C'].profit,
-          },
-        },
-        decisionReason: this.reasonText(),
-      };
-
-      // Save to Firestore (with LocalStorage fallback)
-      await this.firestoreService.saveScenarioSummary(scenario);
-      await this.loadScenarios();
-    } catch (error) {
-      console.error('Failed to save scenario:', error);
-    } finally {
-      this.isSaving.set(false);
-    }
-  }
-
   updateMemo(scenarioId: string | undefined, memo: string): void {
     if (!scenarioId) return;
     const memos = { ...this.reasonMemos() };
@@ -113,19 +59,43 @@ export class ScenarioComparisonComponent implements OnInit {
     this.reasonMemos.set(memos);
   }
 
+  updateUserNote(scenarioId: string | undefined, note: string): void {
+    if (!scenarioId) return;
+    const notes = { ...this.userNotesMemos() };
+    notes[scenarioId] = note;
+    this.userNotesMemos.set(notes);
+  }
+
   async decideScenario(scenario: ScenarioSummary): Promise<void> {
     const updatedScenario: ScenarioSummary = {
       ...scenario,
-      decisionReason: this.reasonMemos()[scenario.id || ''] || scenario.decisionReason,
+      decisionReason: this.reasonMemos()[scenario.id || ''] ?? scenario.decisionReason ?? '',
+      userNotes: this.userNotesMemos()[scenario.id || ''] ?? scenario.userNotes ?? '',
     };
 
     try {
       // Save to Firestore (with LocalStorage fallback)
       await this.firestoreService.saveScenarioSummary(updatedScenario);
-      alert('シナリオが決定・保存されました');
+
+      // Apply scenario data to the store's active state
+      this.simulationStore.applyScenario(updatedScenario);
+
+      // Mark scenario as decided
+      this.decidedScenarioId.set(scenario.id || null);
+
+      // Show notification using MatSnackBar
+      const scenarioName = scenario.name || this.getObjectiveLabel(scenario.objective);
+      this.snackBar.open(`シナリオ「${scenarioName}」を決定し、レポートに反映しました`, '✓', {
+        duration: 5000,
+        horizontalPosition: 'center',
+        verticalPosition: 'top',
+      });
     } catch (error) {
       console.error('Failed to save decision:', error);
-      alert('保存に失敗しました');
+      this.snackBar.open('保存に失敗しました', '閉じる', {
+        duration: 5000,
+        panelClass: ['error-snackbar'],
+      });
     }
   }
 

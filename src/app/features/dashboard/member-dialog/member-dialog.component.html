@@ -34,31 +34,31 @@
             <!-- Sales Column -->
             <ng-container matColumnDef="sales">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>営業力</th>
-              <td mat-cell *matCellDef="let element">{{ element.sales }}</td>
+              <td mat-cell *matCellDef="let element">{{ element.sales | number:'1.0-1' }}</td>
             </ng-container>
 
             <!-- Management Column -->
             <ng-container matColumnDef="management">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>管理力</th>
-              <td mat-cell *matCellDef="let element">{{ element.management }}</td>
+              <td mat-cell *matCellDef="let element">{{ element.management | number:'1.0-1' }}</td>
             </ng-container>
 
             <!-- Development Column -->
             <ng-container matColumnDef="development">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>開拓力</th>
-              <td mat-cell *matCellDef="let element">{{ element.development }}</td>
+              <td mat-cell *matCellDef="let element">{{ element.development | number:'1.0-1' }}</td>
             </ng-container>
 
             <!-- Nurture Column -->
             <ng-container matColumnDef="nurture">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>育成力</th>
-              <td mat-cell *matCellDef="let element">{{ element.nurture }}</td>
+              <td mat-cell *matCellDef="let element">{{ element.nurture | number:'1.0-1' }}</td>
             </ng-container>
 
             <!-- Personnel Cost Column -->
             <ng-container matColumnDef="personnelCost">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>人件費</th>
-              <td mat-cell *matCellDef="let element">{{ element.personnelCost }}</td>
+              <td mat-cell *matCellDef="let element">{{ element.personnelCost | number:'1.0-1' }}</td>
             </ng-container>
 
             <!-- Lock Toggle Column -->
@@ -99,7 +99,7 @@
       color="primary"
       (click)="onRecalculate()"
       [disabled]="isLoading()">
-      再計算して反映
+      反映する
     </button>
   </mat-dialog-actions>
 </div>

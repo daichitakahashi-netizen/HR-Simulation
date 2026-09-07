@@ -177,14 +177,13 @@ export class MemberDialogComponent implements OnInit {
       }
     }
 
-    // Update store with new locks and trigger recalculation
+    // Update store with new locks and set isDirty flag
     this.store.lockedEmployees.set(newLocked);
-    const employees = this.store.employees$.value;
-    this.store.employees$.next([...employees]);
+    this.store.isDirty.set(true);
 
-    this.snackBar.open('ロック設定を更新しました', '✓', { duration: 3000 });
+    this.snackBar.open('ロック設定を更新しました。『再計算を実行』を押して結果を反映してください', '✓', { duration: 5000 });
 
-    // Close dialog after recalculation
+    // Close dialog
     this.dialogRef.close();
   }
 }

@@ -5,12 +5,27 @@
       <mat-card-title>社員データ管理</mat-card-title>
     </mat-card-header>
     <mat-card-content>
-      <div class="upload-section">
-        <button mat-raised-button color="primary" (click)="openFileDialog()">
+      <div class="upload-section"
+           (dragover)="onDragOver($event)"
+           (dragleave)="onDragLeave($event)"
+           (drop)="onDrop($event)"
+           [class.dragging]="isDragging()">
+        <button mat-raised-button color="primary" (click)="openFileDialog()" *ngIf="!store.uploadedFileName()">
           <mat-icon>upload_file</mat-icon>
-          CSV ファイルをアップロード
+          CSV ファイルをアップロード / ドラッグ&ドロップ
         </button>
         <input #fileInput hidden type="file" accept=".csv" (change)="onFileSelected($event)">
+
+        <!-- Uploaded File Info Banner -->
+        <div class="file-info-banner" *ngIf="store.uploadedFileName() as fileName">
+          <div class="file-info-content">
+            <mat-icon class="banner-icon">description</mat-icon>
+            <span class="file-name">{{ fileName }}</span>
+          </div>
+          <button mat-icon-button color="warn" class="delete-btn" (click)="removeAdditionalData()" matTooltip="追加データを削除">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </div>
       </div>
 
       <div class="stats-grid">
@@ -68,7 +83,10 @@
         <!-- ID Column -->
         <ng-container matColumnDef="id">
           <th mat-header-cell *matHeaderCellDef mat-sort-header>ID</th>
-          <td mat-cell *matCellDef="let element">{{ element.id }}</td>
+          <td mat-cell *matCellDef="let element">
+            <span>{{ element.id }}</span>
+            <span class="add-badge" *ngIf="isAdditionalEmployee(element.id)">追加</span>
+          </td>
         </ng-container>
 
         <!-- Sales Column -->
@@ -102,10 +120,10 @@
         </ng-container>
 
         <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-        <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns;" [class.additional-row]="isAdditionalEmployee(row.id)"></tr>
       </table>
 
-      <mat-paginator [pageSizeOptions]="[10, 25, 50, 100]"
+      <mat-paginator [pageSizeOptions]="[10, 25, 50, 100, 110]"
                      [pageSize]="pageSize()"
                      (page)="onPageChange($event)"
                      [length]="getTotalEmployees()">

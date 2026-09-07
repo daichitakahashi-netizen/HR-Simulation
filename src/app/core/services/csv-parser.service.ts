@@ -7,17 +7,13 @@ import { Employee } from '../models/simulation.model';
 export class CsvParserService {
   // Parse CSV text to Employee array
   parseEmployeesCsv(csvText: string): Employee[] {
-    const lines = csvText.split('\n');
+    let cleanText = csvText.replace(/^﻿/, '');
+    const lines = cleanText.split(/\r\n|\r|\n/).filter(line => line.trim().length > 0);
     const employees: Employee[] = [];
 
     // Skip header (first line)
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
-
-      // Skip empty lines
-      if (!line) {
-        continue;
-      }
 
       try {
         const columns = line.split(',');
